@@ -64,6 +64,9 @@ private:
 //information from fragment header
   uint32_t  sequence_id;
   uint64_t  fragment_timestamp;
+  
+  uint64_t  event_timestamp;
+
 
   uint64_t  last_accepted_timestamp;
   uint16_t  lost_hits;
@@ -99,6 +102,7 @@ sbndaq::BernCRTAna::BernCRTAna(fhicl::ParameterSet const & pset)
 
   hits->Branch("sequence_id",               &sequence_id,                 "sequence_id/i");
   hits->Branch("fragment_timestamp",        &fragment_timestamp,          "fragment_timestamp/l");
+  hits->Branch("event_timestamp",           &event_timestamp,             "event_timestamp/l");
 
   hits->Branch("last_accepted_timestamp",   &last_accepted_timestamp,      "last_accepted_timestamp/l");
   hits->Branch("lost_hits",                 &lost_hits,                    "lost_hits/s");
@@ -112,10 +116,30 @@ sbndaq::BernCRTAna::~BernCRTAna()
 
 void sbndaq::BernCRTAna::analyze(art::Event const & evt) {
 
+  //get trigger timing information
+  
+  event_timestamp = 0; //if trigger fragment is not found, the value is set to 0
+
+  std::vector<art::Handle<artdaq::Fragments>> fragmentHandles;
+  evt.getManyByType(fragmentHandles);
+  for (auto handle : fragmentHandles) {
+    if (!handle.isValid() || handle->size() == 0)
+      continue;
+    if (handle->front().type() == sbndaq::detail::FragmentType::ICARUSTriggerUDP) {
+      for (auto fragment : *handle) {
+        event_timestamp = fragment.timestamp();
+        break;
+      }
+      break;
+    }
+  }
+
+
+  //get CRT information
   const std::vector<icarus::crt::BernCRTTranslator> hit_vector =  icarus::crt::BernCRTTranslator::getCRTData(evt);
 
   for(auto & hit : hit_vector) {
-    TLOG(TLVL_INFO)<<hit;
+ //   TLOG(TLVL_INFO)<<hit;
 
     fragment_timestamp        = hit.timestamp;
     sequence_id               = hit.sequence_id;
