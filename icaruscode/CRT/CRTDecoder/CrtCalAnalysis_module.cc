@@ -216,7 +216,7 @@ void icarus::crt::CrtCalAnalyzer::analyze(art::Event const & evt)
 
     fMac5     =  hit.mac5;
 
-    if(macToHistos.find(fMac5) == macToHistos.end()) return;
+    if(macToHistos.find(fMac5) == macToHistos.end()) continue;
 
     for(int ch=0; ch<32; ch++) {
       macToHistos[fMac5]->at(ch)->Fill( hit.adc[ch] );
