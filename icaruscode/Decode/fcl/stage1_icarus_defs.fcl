@@ -11,6 +11,10 @@
 #include "icarus_flashfinder.fcl"
 #include "icarus_trackcalo_skimmer.fcl"
 
+# For calo
+#include "calorimetry_icarus.fcl"
+#include "particleid_icarus.fcl"
+
 BEGIN_PROLOG
 
 ### This is the complete list of all producers! ###
@@ -56,6 +60,16 @@ icarus_stage1_producers:
   # Placeholder uncalibrated calorimetry
   caloskimCalorimetryCryoE: @local::caloskim_calorimetry
   caloskimCalorimetryCryoW: @local::caloskim_calorimetry
+
+  # BH: test setup to do calo/pid
+  pandoraGausCaloCryoE:                 @local::icarus_gnewcalomc
+  pandoraGausPidCryoE:                  @local::icarus_chi2pid
+  pandoraGausCaloCryoW:                 @local::icarus_gnewcalomc
+  pandoraGausPidCryoW:                  @local::icarus_chi2pid
+
+  # BH: showers
+  SBNShowerGausCryoE:                   @local::icarus_pandorashower_3dTraj
+  SBNShowerGausCryoW:                   @local::icarus_pandorashower_3dTraj
 }
 
 icarus_stage1_filters:
@@ -96,12 +110,24 @@ icarus_reco_pandoraGaus:           [ pandoraGaus,
 
 icarus_reco_pandoraGausCryoW:      [ pandoraGausCryoW,
                                      pandoraTrackGausCryoW,
-                                     pandoraKalmanTrackGausCryoW
+                                     pandoraKalmanTrackGausCryoW,
+				     SBNShowerGausCryoW
                                    ]
 
 icarus_reco_pandoraGausCryoE:      [ pandoraGausCryoE,
                                      pandoraTrackGausCryoE,
-                                     pandoraKalmanTrackGausCryoE
+                                     pandoraKalmanTrackGausCryoE,
+				     SBNShowerGausCryoE
+                                   ]
+
+icarus_reco_calopidCryoW:          [
+				     pandoraGausCaloCryoW,
+				     pandoraGausPidCryoW
+                                   ]
+
+icarus_reco_calopidCryoE:          [
+                                     pandoraGausCaloCryoE,
+                                     pandoraGausPidCryoE
                                    ]
 
 icarus_reco_Gauss:                 [
@@ -111,12 +137,14 @@ icarus_reco_Gauss:                 [
 
 icarus_reco_Gauss_CryoW:           [ 
                                      @sequence::icarus_reco_cluster3DCryoW,
-                                     @sequence::icarus_reco_pandoraGausCryoW
+                                     @sequence::icarus_reco_pandoraGausCryoW,
+				     @sequence::icarus_reco_calopidCryoW
                                    ]
 
 icarus_reco_Gauss_CryoE:           [ 
                                      @sequence::icarus_reco_cluster3DCryoE,
-                                     @sequence::icarus_reco_pandoraGausCryoE
+                                     @sequence::icarus_reco_pandoraGausCryoE,
+				     @sequence::icarus_reco_calopidCryoE
                                    ]
 
 ### Below we include overrides for the modules above
@@ -168,5 +196,24 @@ icarus_stage1_producers.caloskimCalorimetryCryoW.TrackModuleLabel:              
 #icarus_stage1_producers.pandoraGausCryoW.ConfigFile:                                             "PandoraSettings_Master_ICARUS_RawICARUS.xml"
 #icarus_stage1_producers.pandoraGausCryoE.ConfigFile:                                             "PandoraSettings_Master_ICARUS_RawICARUS.xml"
 
+# BH: Set up the Calo/PID as in the reco_icarus.fcl file with any needed overrides from Filippo's fcl
+#     (actually don't think I need any): point the pandora CALO modules to pandora output
+icarus_stage1_producers.pandoraGausCaloCryoE.TrackModuleLabel:                                   "pandoraTrackGausCryoE"
+icarus_stage1_producers.pandoraGausPidCryoE.TrackModuleLabel:                                    "pandoraTrackGausCryoE"
+icarus_stage1_producers.pandoraGausPidCryoE.CalorimetryModuleLabel:                              "pandoraGausCaloCryoE"
+icarus_stage1_producers.pandoraGausCaloCryoE.FieldDistortion:                                    false
+icarus_stage1_producers.pandoraGausCaloCryoE.TrackIsFieldDistortionCorrected:                    false
+icarus_stage1_producers.pandoraGausCaloCryoE.FieldDistortionEfield:                              false
+
+icarus_stage1_producers.pandoraGausCaloCryoW.TrackModuleLabel:                                   "pandoraTrackGausCryoW"
+icarus_stage1_producers.pandoraGausPidCryoW.TrackModuleLabel:                                    "pandoraTrackGausCryoW"
+icarus_stage1_producers.pandoraGausPidCryoW.CalorimetryModuleLabel:                              "pandoraGausCaloCryoW"
+icarus_stage1_producers.pandoraGausCaloCryoW.FieldDistortion:                                    false
+icarus_stage1_producers.pandoraGausCaloCryoW.TrackIsFieldDistortionCorrected:                    false
+icarus_stage1_producers.pandoraGausCaloCryoW.FieldDistortionEfield:                              false
+
+# BH: Showers from reco_icarus.fcl (adapted)
+icarus_stage1_producers.SBNShowerGausCryoE.PFParticleLabel:                                      "pandoraGausCryoE"
+icarus_stage1_producers.SBNShowerGausCryoW.PFParticleLabel:                                      "pandoraGausCryoW"
 
 END_PROLOG

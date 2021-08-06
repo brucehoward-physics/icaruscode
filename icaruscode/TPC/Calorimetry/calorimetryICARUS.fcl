@@ -5,7 +5,9 @@ BEGIN_PROLOG
 icarus_calorimetryalgdata:	@local::standard_calorimetryalgdata
 icarus_calorimetryalgmc:	  @local::standard_calorimetryalgmc
 #calorimetry constants from I. Ginnett (docdb18991) - Lariat method:
-icarus_calorimetryalgmc.CalAreaConstants:[ 1.56e-2, 1.35e-2, 1.59e-2 ]
+#icarus_calorimetryalgmc.CalAreaConstants:[ 1.56e-2, 1.35e-2, 1.59e-2 ]
+#BH: updated summer 2021 based on prelim measurements with coll plane, doc-22328 by G. Putnam
+icarus_calorimetryalgmc.CalAreaConstants:[ 1.56e-2, 1.35e-2, 1.17e-2 ]
 
 
 
