@@ -2,6 +2,8 @@
 ## This fhicl file is used to run "stage0" processing specifically for the case where all
 ## TPC data is included in an artdaq data product from a single instance
 ##
+#include "filters.fcl"
+
 #include "decodePMTdefs_icarus.fcl"
 #include "stage0_icarus_driver_common.fcl"
 
@@ -12,8 +14,13 @@ physics.producers: {
   @table::decoder_PMT_trigger_minbias_skiptrigger_icarus
 }
 
+physics.filters: {
+  @table::physics.filters
+  evtfilter: @local::evtfilter
+}
+
 ## Use the following to run the full defined stage0 set of modules
-physics.reco: [ @sequence::icarus_stage0_multiTPC ] #@sequence::icarus_stage0_PMT, @sequence::icarus_stage0_multiTPC]
+physics.reco: [ evtfilter, @sequence::icarus_stage0_multiTPC ] #@sequence::icarus_stage0_PMT, @sequence::icarus_stage0_multiTPC]
 
 ## Use the following to run only the decoding and noise filtering
 ## ==> Set as default for production processing for lifetime measurements - Jan, 2021
@@ -28,6 +35,9 @@ outputs.outBNB.dataTier: "reconstructed"
 # Drop the artdaq format files on output
 outputs.outBNB.outputCommands: ["keep *_*_*_*", "drop *_*_*_DAQ*", "drop *_decon1droi_*_*", "drop *_decon1DroiTPC*_*_*" ]
 
+# Keep just the stuff passing the filter
+outputs.outBNB.SelectEvents: ["reco"]
+
 # Set up for the single module mutliple TPC mode...
 physics.producers.daqTPC.FragmentsLabelVec:              ["daq:PHYSCRATEDATATPCWW","daq:PHYSCRATEDATATPCWE","daq:PHYSCRATEDATATPCEW","daq:PHYSCRATEDATATPCEE"]
 physics.producers.decon1droi.RawDigitLabelVec:           ["daqTPC:PHYSCRATEDATATPCWW","daqTPC:PHYSCRATEDATATPCWE","daqTPC:PHYSCRATEDATATPCEW","daqTPC:PHYSCRATEDATATPCEE"]
@@ -35,3 +45,8 @@ physics.producers.roifinder.WireModuleLabelVec:          ["decon1droi:PHYSCRATED
 
 # BH: FOR SKIM FILES, OVERRIDE GEOM
 source.inputCommands: ["keep *_*_*_*", "drop sumdata::GeometryConfigurationInfo_GeometryConfigurationWriter__*"]
+
+# Event Filter stuff so only use the events in question
+#############################
+physics.filters.evtfilter.Selection: 1
+physics.filters.evtfilter.EventList: "eventlist_5679.txt"

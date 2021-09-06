@@ -2,12 +2,18 @@
 ## This fhicl file is used to run "stage0" processing specifically for the case where all
 ## TPC data is included in an artdaq data product from a single instance
 ##
+#include "decodePMTdefs_icarus.fcl"
 #include "stage0_icarus_driver_common.fcl"
 
 process_name: stage0
 
+physics.producers: {
+  @table::physics.producers
+  @table::decoder_PMT_trigger_minbias_run5252_icarus
+}
+
 ## Use the following to run the full defined stage0 set of modules
-physics.reco: [@sequence::icarus_stage0_PMT, @sequence::icarus_stage0_multiTPC_TPC, gaushitTPCWE]
+physics.reco: [ @sequence::icarus_stage0_multiTPC_TPC, gaushitTPCWE ] #@sequence::icarus_stage0_PMT, @sequence::icarus_stage0_multiTPC_TPC, gaushitTPCWE]
 
 ## Use the following to run only the decoding and noise filtering
 ## ==> Set as default for production processing for lifetime measurements - Jan, 2021
