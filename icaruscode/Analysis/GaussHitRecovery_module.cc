@@ -181,84 +181,84 @@ void GaussHitRecovery::produce(art::Event& e)
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
       if ( e.getByLabel(iLabel,hitsHandle) ) {
-	art::fill_ptr_vector(hits,hitsHandle);
+	      art::fill_ptr_vector(hits,hitsHandle);
       }
       else{
-	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
-	return;
+      	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
+      	return;
       }
 
       for ( auto const& iHitPtr : hits ) {
-	std::vector<int> wire_list;
-	std::vector<float> tick_list;
-	std::vector<float> rms_list;
+      	std::vector<int> wire_list;
+      	std::vector<float> tick_list;
+      	std::vector<float> rms_list;
 	
-	auto const& thisTime = iHitPtr->PeakTime();
-	geo::WireID const& wID = iHitPtr->WireID();
-	auto const& thisCryo = wID.Cryostat;
-	auto const& thisTPC = wID.TPC;
-	auto const& thisPlane = wID.Plane;
-	auto const& thisWire = wID.Wire;
+      	auto const& thisTime = iHitPtr->PeakTime();
+      	geo::WireID const& wID = iHitPtr->WireID();
+      	auto const& thisCryo = wID.Cryostat;
+      	auto const& thisTPC = wID.TPC;
+	      auto const& thisPlane = wID.Plane;
+      	auto const& thisWire = wID.Wire;
 
-	if ( fSkipRecoveryPlane == (int)thisPlane ) continue;
+      	if ( fSkipRecoveryPlane == (int)thisPlane ) continue;
 	
-	// Figure out how many neighbors this hit has, and if it has enough, see if they are a fairly linear grouping
-	int nNeighbors = -1; // start at -1 since we will count ourselves later
-	for ( auto const& jHitPtr : hits ) {
-	  auto const& jTime = jHitPtr->PeakTime();
-	  auto const& jRMS = jHitPtr->RMS();
-	  geo::WireID const& jWID = jHitPtr->WireID();
-	  auto const& jCryo = jWID.Cryostat;
-	  auto const& jTPC = jWID.TPC;
-	  auto const& jPlane = jWID.Plane;
-	  auto const& jWire = jWID.Wire;
-	  if( jCryo!=thisCryo || jTPC!=thisTPC || jPlane!=thisPlane ) continue;
-	  if( std::fabs(thisWire-jWire)<fNWiresSmooth && std::fabs(thisTime-jTime)<fNTicksSmooth ){
-	    nNeighbors+=1;
-	    wire_list.push_back(jWire);
-	    tick_list.push_back(jTime);
-	    rms_list.push_back(jRMS);
-	  }
-	}
+      	// Figure out how many neighbors this hit has, and if it has enough, see if they are a fairly linear grouping
+      	int nNeighbors = -1; // start at -1 since we will count ourselves later
+      	for ( auto const& jHitPtr : hits ) {
+      	  auto const& jTime = jHitPtr->PeakTime();
+      	  auto const& jRMS = jHitPtr->RMS();
+      	  geo::WireID const& jWID = jHitPtr->WireID();
+      	  auto const& jCryo = jWID.Cryostat;
+      	  auto const& jTPC = jWID.TPC;
+      	  auto const& jPlane = jWID.Plane;
+      	  auto const& jWire = jWID.Wire;
+      	  if( jCryo!=thisCryo || jTPC!=thisTPC || jPlane!=thisPlane ) continue;
+      	  if( std::fabs(thisWire-jWire)<fNWiresSmooth && std::fabs(thisTime-jTime)<fNTicksSmooth ){
+    	      nNeighbors+=1;
+    	      wire_list.push_back(jWire);
+	          tick_list.push_back(jTime);
+	          rms_list.push_back(jRMS);
+      	  }
+	      }
 
-	if( nNeighbors < fReqNeighbors ) continue;
+      	if( nNeighbors < fReqNeighbors ) continue;
 	
-	// Do a linear regression to see if this group of hits is "line-like" (aka track-like)
-	// See especially:
-	//   https://en.wikipedia.org/wiki/Simple_linear_regression
-	//   https://en.wikipedia.org/wiki/Reduced_chi-squared_statistic
-	// Doesn't account for hit RMS's here, just uses the peak times
-	// -- Get m and b
-	double xave = 0.;
-	double yave = 0.;
-	for( unsigned int idx=0; idx<wire_list.size(); idx++ ){
-	  xave+=wire_list[idx];
-	  yave+=tick_list[idx];
-	}
-	xave/=double(wire_list.size());
-	yave/=double(wire_list.size());
-	// slope: numerator is s_{x,y}, denominator s_{x^2}
-	double s_xy = 0.;
-	double s_x2 = 0.;
-	for( unsigned int idx=0; idx<wire_list.size(); idx++ ){
-	  s_xy+=((wire_list[idx]-xave)*(tick_list[idx]-yave));
-	  s_x2+=((wire_list[idx]-xave)*(wire_list[idx]-xave));
-	}
-	double slope = s_xy / s_x2;
-	double intercept = yave - slope*xave;
+	      // Do a linear regression to see if this group of hits is "line-like" (aka track-like)
+      	// See especially:
+      	//   https://en.wikipedia.org/wiki/Simple_linear_regression
+      	//   https://en.wikipedia.org/wiki/Reduced_chi-squared_statistic
+      	// Doesn't account for hit RMS's here, just uses the peak times
+      	// -- Get m and b
+      	double xave = 0.;
+      	double yave = 0.;
+      	for( unsigned int idx=0; idx<wire_list.size(); idx++ ){
+      	  xave+=wire_list[idx];
+      	  yave+=tick_list[idx];
+      	}
+      	xave/=double(wire_list.size());
+      	yave/=double(wire_list.size());
+      	// slope: numerator is s_{x,y}, denominator s_{x^2}
+      	double s_xy = 0.;
+      	double s_x2 = 0.;
+      	for( unsigned int idx=0; idx<wire_list.size(); idx++ ){
+      	  s_xy+=((wire_list[idx]-xave)*(tick_list[idx]-yave));
+      	  s_x2+=((wire_list[idx]-xave)*(wire_list[idx]-xave));
+      	}
+      	double slope = s_xy / s_x2;
+      	double intercept = yave - slope*xave;
 	
-	// -- Get Chi2/N.D.F.
-	// assumes sigma=hit RMS
-	double chi2ndf = 0.;
-	for( unsigned int idx=0; idx<wire_list.size(); idx++ ){
-	  double expect=slope*wire_list[idx]+intercept;
-	  chi2ndf+=((tick_list[idx]-expect)*(tick_list[idx]-expect)/(rms_list[idx]*rms_list[idx]));
-	}
-	chi2ndf/=(double(wire_list.size()-2.));
+      	// -- Get Chi2/N.D.F.
+      	// assumes sigma=hit RMS
+      	double chi2ndf = 0.;
+      	for( unsigned int idx=0; idx<wire_list.size(); idx++ ){
+      	  double expect=slope*wire_list[idx]+intercept;
+      	  chi2ndf+=((tick_list[idx]-expect)*(tick_list[idx]-expect)/(rms_list[idx]*rms_list[idx]));
+      	}
+      	chi2ndf/=(double(wire_list.size()-2.));
 	
-	if( chi2ndf > fMaxChi2NDF ) continue;
+      	if( chi2ndf > fMaxChi2NDF ) continue;
 	
-	linreg[ wID.asPlaneID() ].push_back( std::make_pair(slope,intercept) );
+	      linreg[ wID.asPlaneID() ].push_back( std::make_pair(slope,intercept) );
       } // loop hits
     } // loop hit labels
   } // end !fUseReducHitClusters
@@ -270,90 +270,90 @@ void GaussHitRecovery::produce(art::Event& e)
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
       if ( e.getByLabel(iLabel,hitsHandle) ) {
-	art::fill_ptr_vector(hits,hitsHandle);
+      	art::fill_ptr_vector(hits,hitsHandle);
       }
       else{
-	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
-	return;
+      	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
+      	return;
       }
 
       // Cluster set
       art::Handle< std::vector<recob::Cluster> > clusterHandle;
       std::vector< art::Ptr<recob::Cluster> > clusters;
       if ( e.getByLabel(iLabel,clusterHandle) ) {
-	art::fill_ptr_vector(clusters,clusterHandle);
+      	art::fill_ptr_vector(clusters,clusterHandle);
       }
       else{
-	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Cluster with label " << iLabel;
+	      mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Cluster with label " << iLabel;
         return;
       }
 
       // Find many for the clusters, hits
       art::FindManyP<recob::Hit> fmhit(clusterHandle, e, iLabel);
       if( !fmhit.isValid() ){
-	// Check against validity of fmtrk (using isValid, as used in an analyzer module from SBND)
-	mf::LogError("GaussHitRecovery") << "Error in validity of fmhit. Returning.";
-	return;
+	      // Check against validity of fmtrk (using isValid, as used in an analyzer module from SBND)
+      	mf::LogError("GaussHitRecovery") << "Error in validity of fmhit. Returning.";
+      	return;
       }
 
       for ( auto const& iCluster : clusters ) { // loop clusters
-	std::vector< art::Ptr<recob::Hit> > clusterHits = fmhit.at(iCluster.key());
+      	std::vector< art::Ptr<recob::Hit> > clusterHits = fmhit.at(iCluster.key());
 
-	if ( clusterHits.size()==0 ) continue;
+      	if ( clusterHits.size()==0 ) continue;
 
-	std::map< geo::PlaneID, std::vector<int> > wire_list;
-	std::map< geo::PlaneID, std::vector<float> > tick_list;
-	std::map< geo::PlaneID, std::vector<float> > rms_list;
+        std::map< geo::PlaneID, std::vector<int> > wire_list;
+	      std::map< geo::PlaneID, std::vector<float> > tick_list;
+    	  std::map< geo::PlaneID, std::vector<float> > rms_list;
 
-	for( auto const& iHitPtr : clusterHits ) {
-	  geo::WireID const& wID = iHitPtr->WireID();
-	  if ( fSkipRecoveryPlane == (int)wID.Plane ) continue;
+      	for( auto const& iHitPtr : clusterHits ) {
+      	  geo::WireID const& wID = iHitPtr->WireID();
+      	  if ( fSkipRecoveryPlane == (int)wID.Plane ) continue;
 
-	  tick_list[wID.asPlaneID()].push_back( iHitPtr->PeakTime() );
+      	  tick_list[wID.asPlaneID()].push_back( iHitPtr->PeakTime() );
           rms_list[wID.asPlaneID()].push_back( iHitPtr->RMS() );
-	  wire_list[wID.asPlaneID()].push_back( wID.Wire );
-	}
+	        wire_list[wID.asPlaneID()].push_back( wID.Wire );
+      	}
 
-	for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
-	  if ( tick_list.find(iPlaneID) == tick_list.end() ) continue;
+      	for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
+      	  if ( tick_list.find(iPlaneID) == tick_list.end() ) continue;
 
-	  // Do a linear regression to see if this group of hits is "line-like" (aka track-like)
-	  // See especially:
-	  //   https://en.wikipedia.org/wiki/Simple_linear_regression
-	  //   https://en.wikipedia.org/wiki/Reduced_chi-squared_statistic
-	  // Doesn't account for hit RMS's here, just uses the peak times
-	  // -- Get m and b
-	  double xave = 0.;
-	  double yave = 0.;
-	  for( unsigned int idx=0; idx<wire_list[iPlaneID].size(); idx++ ){
-	    xave+=wire_list[iPlaneID][idx];
-	    yave+=tick_list[iPlaneID][idx];
-	  }
-	  xave/=double(wire_list[iPlaneID].size());
-	  yave/=double(wire_list[iPlaneID].size());
-	  // slope: numerator is s_{x,y}, denominator s_{x^2}
-	  double s_xy = 0.;
-	  double s_x2 = 0.;
-	  for( unsigned int idx=0; idx<wire_list[iPlaneID].size(); idx++ ){
-	    s_xy+=((wire_list[iPlaneID][idx]-xave)*(tick_list[iPlaneID][idx]-yave));
-	    s_x2+=((wire_list[iPlaneID][idx]-xave)*(wire_list[iPlaneID][idx]-xave));
-	  }
-	  double slope = s_xy / s_x2;
-	  double intercept = yave - slope*xave;
+      	  // Do a linear regression to see if this group of hits is "line-like" (aka track-like)
+      	  // See especially:
+      	  //   https://en.wikipedia.org/wiki/Simple_linear_regression
+      	  //   https://en.wikipedia.org/wiki/Reduced_chi-squared_statistic
+      	  // Doesn't account for hit RMS's here, just uses the peak times
+      	  // -- Get m and b
+      	  double xave = 0.;
+      	  double yave = 0.;
+      	  for( unsigned int idx=0; idx<wire_list[iPlaneID].size(); idx++ ){
+      	    xave+=wire_list[iPlaneID][idx];
+      	    yave+=tick_list[iPlaneID][idx];
+      	  }
+      	  xave/=double(wire_list[iPlaneID].size());
+      	  yave/=double(wire_list[iPlaneID].size());
+      	  // slope: numerator is s_{x,y}, denominator s_{x^2}
+      	  double s_xy = 0.;
+      	  double s_x2 = 0.;
+      	  for( unsigned int idx=0; idx<wire_list[iPlaneID].size(); idx++ ){
+      	    s_xy+=((wire_list[iPlaneID][idx]-xave)*(tick_list[iPlaneID][idx]-yave));
+      	    s_x2+=((wire_list[iPlaneID][idx]-xave)*(wire_list[iPlaneID][idx]-xave));
+      	  }
+      	  double slope = s_xy / s_x2;
+      	  double intercept = yave - slope*xave;
 	  
-	  // -- Get Chi2/N.D.F.
-	  // assumes sigma=hit RMS
-	  double chi2ndf = 0.;
-	  for( unsigned int idx=0; idx<wire_list[iPlaneID].size(); idx++ ){
-	    double expect=slope*wire_list[iPlaneID][idx]+intercept;
-	    chi2ndf+=((tick_list[iPlaneID][idx]-expect)*(tick_list[iPlaneID][idx]-expect)/(rms_list[iPlaneID][idx]*rms_list[iPlaneID][idx]));
-	  }
-	  chi2ndf/=(double(wire_list[iPlaneID].size()-2.));
+      	  // -- Get Chi2/N.D.F.
+      	  // assumes sigma=hit RMS
+      	  double chi2ndf = 0.;
+      	  for( unsigned int idx=0; idx<wire_list[iPlaneID].size(); idx++ ){
+      	    double expect=slope*wire_list[iPlaneID][idx]+intercept;
+      	    chi2ndf+=((tick_list[iPlaneID][idx]-expect)*(tick_list[iPlaneID][idx]-expect)/(rms_list[iPlaneID][idx]*rms_list[iPlaneID][idx]));
+      	  }
+      	  chi2ndf/=(double(wire_list[iPlaneID].size()-2.));
 	  
-	  if( chi2ndf > fMaxChi2NDF ) continue;
+      	  if( chi2ndf > fMaxChi2NDF ) continue;
 	  
-	  linreg[ iPlaneID ].push_back( std::make_pair(slope,intercept) );
-	} // loop planeIDs
+      	  linreg[ iPlaneID ].push_back( std::make_pair(slope,intercept) );
+      	} // loop planeIDs
       } // loop clusters
     } // loop hit labels
   }
@@ -376,49 +376,49 @@ void GaussHitRecovery::produce(art::Event& e)
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
       if ( e.getByLabel(iLabel,hitsHandle) ) {
-	art::fill_ptr_vector(hits,hitsHandle);
+      	art::fill_ptr_vector(hits,hitsHandle);
       }
       else{
-	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
-	return;
+	      mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
+	      return;
       }
 
       for ( auto const& iHitPtr : hits ) {
-	auto const& thisTime = iHitPtr->PeakTime();
-	auto const& thisRMS = iHitPtr->RMS();
-	std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
-	for ( auto const& iWire : wires ) {
-	  auto const& thisWire = iWire.Wire;
-	  auto const& thisPlane = iWire.Plane;
+      	auto const& thisTime = iHitPtr->PeakTime();
+      	auto const& thisRMS = iHitPtr->RMS();
+      	std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
+      	for ( auto const& iWire : wires ) {
+      	  auto const& thisWire = iWire.Wire;
+      	  auto const& thisPlane = iWire.Plane;
 	
-	  if ( fSkipRecoveryPlane == (int)thisPlane ) continue;
+      	  if ( fSkipRecoveryPlane == (int)thisPlane ) continue;
 
-	  // if no linreg on this plane then skip
-	  if( linreg.find(iWire.asPlaneID()) == linreg.end() ) continue;
+      	  // if no linreg on this plane then skip
+      	  if( linreg.find(iWire.asPlaneID()) == linreg.end() ) continue;
 
-	  // loop through the linreg for this PlaneID and see if the hit is consistent with one of them
-	  for ( auto const& iLine : linreg[iWire.asPlaneID()] ) {
-	    double expect = iLine.first*thisWire + iLine.second;
-	    if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
-	      // Check if the hit is already in the set of cluster3d hits and skip it if so
-	      bool isReduc = false;
-	      if ( !(wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end()) ) {
-		// Now check this wire's hits for something with the same tick and RMS
-		for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
-		  if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
-		    isReduc = true;
-		    break;
-		  }
-		}
-	      }
-	      if ( isReduc ) break;
-	      // Put the hit into the recovered hit vector
-	      recob::Hit theHit = *iHitPtr;
-	      hitCol.emplace_back(std::move(theHit));
-	      break;
-	    }
-	  }
-	}
+      	  // loop through the linreg for this PlaneID and see if the hit is consistent with one of them
+      	  for ( auto const& iLine : linreg[iWire.asPlaneID()] ) {
+       	    double expect = iLine.first*thisWire + iLine.second;
+      	    if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
+      	      // Check if the hit is already in the set of cluster3d hits and skip it if so
+      	      bool isReduc = false;
+      	      if ( !(wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end()) ) {
+            		// Now check this wire's hits for something with the same tick and RMS
+		            for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
+	            	  if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
+	            	    isReduc = true;
+	            	    break;
+	            	  }
+	            	}
+      	      }
+	            if ( isReduc ) break;
+	            // Put the hit into the recovered hit vector
+	            recob::Hit theHit = *iHitPtr;
+	            hitCol.emplace_back(std::move(theHit));
+	            break;
+	          }
+    	    } // loop linear regressions for this plane
+    	  } // loop wires matching to the channel in the hit
       } // loop hits
     } // loop hit labels
   } // only if totLinReg > 0, i.e. skip if using fUseReducHitPCAxis
@@ -445,11 +445,11 @@ void GaussHitRecovery::produce(art::Event& e)
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
       if ( e.getByLabel(iLabel,hitsHandle) ) {
-	art::fill_ptr_vector(hits,hitsHandle);
+      	art::fill_ptr_vector(hits,hitsHandle);
       }
       else{
-	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
-	return;
+	      mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
+	      return;
       }
 
       // Loop through PFParticles
@@ -457,39 +457,39 @@ void GaussHitRecovery::produce(art::Event& e)
       art::Handle< std::vector<recob::PFParticle> > pfpsHandle;
       std::vector< art::Ptr<recob::PFParticle> > pfps;
       if ( e.getByLabel(iLabel,pfpsHandle) ) {
-	art::fill_ptr_vector(pfps,pfpsHandle);
+      	art::fill_ptr_vector(pfps,pfpsHandle);
       }
       else{
-	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::PFParticle with label " << iLabel;
+	      mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::PFParticle with label " << iLabel;
         return;
       }
 
       art::FindManyP<recob::PCAxis> fmpca(pfpsHandle, e, iLabel);
       if( !fmpca.isValid() ){
         // Check against validity of fmpca (using isValid, as used in an analyzer module from SBND)
-	mf::LogError("GaussHitRecovery") << "Error in validity of fmpca. Returning.";
+	      mf::LogError("GaussHitRecovery") << "Error in validity of fmpca. Returning.";
         return;
       }
 
       art::FindManyP<recob::Cluster> fmcl(pfpsHandle, e, iLabel);
       if( !fmcl.isValid() ){
-	mf::LogError("GaussHitRecovery") << "Error in validity of fmcl. Returning.";
+	      mf::LogError("GaussHitRecovery") << "Error in validity of fmcl. Returning.";
         return;
       }
 
       art::Handle< std::vector<recob::Cluster> > clusterHandle;
       std::vector< art::Ptr<recob::Cluster> > clusters;
       if ( e.getByLabel(iLabel,clusterHandle) ) {
-	art::fill_ptr_vector(clusters,clusterHandle);
+      	art::fill_ptr_vector(clusters,clusterHandle);
       }
       else{
-	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Cluster with label " << iLabel;
+        mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Cluster with label " << iLabel;
         return;
       }
 
       art::FindManyP<recob::Hit> fmhit(clusterHandle, e, iLabel);
       if( !fmhit.isValid() ){
-	mf::LogError("GaussHitRecovery") << "Error in validity of fmhit. Returning.";
+      	mf::LogError("GaussHitRecovery") << "Error in validity of fmhit. Returning.";
         return;
       }
 
@@ -498,42 +498,42 @@ void GaussHitRecovery::produce(art::Event& e)
       std::vector< std::map< geo::PlaneID, std::pair<float,float> > > pcaClusterPoint; // a point relating to cluster
 
       for ( auto const& iPFP : pfps ) {
-	std::map< geo::PlaneID, std::pair<float,float> > thisPcaClusterPoint;
+	      std::map< geo::PlaneID, std::pair<float,float> > thisPcaClusterPoint;
 
-	std::vector< art::Ptr<recob::Cluster> > clst = fmcl.at(iPFP.key());
-	//std::cout << "pfp matches " << clst.size() << " clusters" << std::endl;
+      	std::vector< art::Ptr<recob::Cluster> > clst = fmcl.at(iPFP.key());
+	      //std::cout << "pfp matches " << clst.size() << " clusters" << std::endl;
 
-	std::vector< art::Ptr<recob::PCAxis> > pcas = fmpca.at(iPFP.key());
+	      std::vector< art::Ptr<recob::PCAxis> > pcas = fmpca.at(iPFP.key());
 
-	if ( pcas.size()!=2 ) {
-	  mf::LogWarning("GaussHitRecovery") << "WARNING!! Looking at PFP without 2 PCAxis objects. Curious!" << std::endl;
-	}
+	      if ( pcas.size()!=2 ) {
+	        mf::LogWarning("GaussHitRecovery") << "WARNING!! Looking at PFP without 2 PCAxis objects. Curious!";
+	      }
 
-	auto const& ax1 = pcas[0];
+      	auto const& ax1 = pcas[0];
 
-	// Principal axes:
-	auto const& ax1vec = ax1->getEigenVectors();
-	auto const& ax1val = ax1->getEigenValues();
+	      // Principal axes:
+	      auto const& ax1vec = ax1->getEigenVectors();
+	      auto const& ax1val = ax1->getEigenValues();
 
-	// Pick out if PCAxis suggests it is linear, at least order of magnitude larger than 2nd and 3rd components.
-	if ( (ax1val[2] <= 10.*ax1val[1]) && (ax1val[2] <= 10.*ax1val[0]) ) continue;
+	      // Pick out if PCAxis suggests it is linear, at least order of magnitude larger than 2nd and 3rd components.
+	      if ( (ax1val[2] <= 10.*ax1val[1]) && (ax1val[2] <= 10.*ax1val[0]) ) continue;
 
-	// Get a point in the PCAxis related cluster, map it plane by plane
-	for ( auto const& iClst : clst ) {
-	  std::vector< art::Ptr<recob::Hit> > clstHits = fmhit.at( iClst.key() );
-	  if ( clstHits.size() == 0 ) continue;
-	  // consider just hit[0]
-	  if ( fSkipRecoveryPlane == (int)clstHits[0]->WireID().Plane ) continue;
-	  std::pair hitPoint = std::make_pair( clstHits[0]->WireID().Wire, clstHits[0]->PeakTime() );
-	  thisPcaClusterPoint[ clstHits[0]->WireID().asPlaneID() ] = hitPoint;
-	}
+	      // Get a point in the PCAxis related cluster, map it plane by plane
+      	for ( auto const& iClst : clst ) {
+	        std::vector< art::Ptr<recob::Hit> > clstHits = fmhit.at( iClst.key() );
+      	  if ( clstHits.size() == 0 ) continue;
+      	  // consider just hit[0]
+      	  if ( fSkipRecoveryPlane == (int)clstHits[0]->WireID().Plane ) continue;
+      	  std::pair hitPoint = std::make_pair( clstHits[0]->WireID().Wire, clstHits[0]->PeakTime() );
+      	  thisPcaClusterPoint[ clstHits[0]->WireID().asPlaneID() ] = hitPoint;
+	      }
 
-	pcaClusterPoint.push_back(thisPcaClusterPoint);
+	      pcaClusterPoint.push_back(thisPcaClusterPoint);
 
-	TVector3 pcaV(ax1vec[2].at(0),ax1vec[2].at(1),ax1vec[2].at(2));
-	pcaVectors.push_back(pcaV);
+	      TVector3 pcaV(ax1vec[2].at(0),ax1vec[2].at(1),ax1vec[2].at(2));
+      	pcaVectors.push_back(pcaV);
 
-	pcaMagnitudes.push_back( (float)ax1val[2] );
+      	pcaMagnitudes.push_back( (float)ax1val[2] );
       }
 
       // TEST ME
@@ -546,29 +546,30 @@ void GaussHitRecovery::produce(art::Event& e)
       // The objects pcaClusterPoint, pcaVectors, pcaMagnitudes should all line up in terms of entries, so can be matched
       // Then, assign any matches to the overall map's vectors
       for ( unsigned int i=0; i<(pcaVectors.size()-1); ++i ) {
-	auto const& pca1 = pcaVectors[i];
-	// Check this against the other line-like PCAxis objects
-	for ( unsigned int j=i+1; j<pcaVectors.size(); ++j ) {
-	  auto const& pca2 = pcaVectors[j];
-	  // Check if this point is within the tolerance of the PCAxis "cone"
-	  double vAngle = ( 180./TMath::Pi() )*pca1.Angle( pca2 );
-	  vAngle = std::min( vAngle, 180.-vAngle );
-	  if( vAngle > fPCAxisTolerance ) continue; // doesn't pass tolerance
+      	auto const& pca1 = pcaVectors[i];
+      	// Check this against the other line-like PCAxis objects
+      	for ( unsigned int j=i+1; j<pcaVectors.size(); ++j ) {
+      	  auto const& pca2 = pcaVectors[j];
+      	  // Check if this point is within the tolerance of the PCAxis "cone"
+      	  double vAngle = ( 180./TMath::Pi() )*pca1.Angle( pca2 );
+      	  vAngle = std::min( vAngle, 180.-vAngle );
+      	  if( vAngle > fPCAxisTolerance ) continue; // doesn't pass tolerance
 
-	  for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
-	    if ( pcaClusterPoint.at(i).find(iPlaneID)==pcaClusterPoint.at(i).end() ||
-		 pcaClusterPoint.at(j).find(iPlaneID)==pcaClusterPoint.at(j).end() ) continue; // no points for cluster in this plane
+      	  for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
+	          if ( pcaClusterPoint.at(i).find(iPlaneID)==pcaClusterPoint.at(i).end() ||
+	            	 pcaClusterPoint.at(j).find(iPlaneID)==pcaClusterPoint.at(j).end() )
+              continue; // no points for cluster in this plane
 
-	    allPcaVectors[ iPlaneID ].push_back( std::make_pair(pca1,pca2) ); // store the points and such for use later
-	    allPcaMagnitudes[ iPlaneID ].push_back( std::make_pair(pcaMagnitudes[i],pcaMagnitudes[j]) );
+	          allPcaVectors[ iPlaneID ].push_back( std::make_pair(pca1,pca2) ); // store the points and such for use later
+      	    allPcaMagnitudes[ iPlaneID ].push_back( std::make_pair(pcaMagnitudes[i],pcaMagnitudes[j]) );
 
-	    //auto wire1 = pcaClusterPoint.at(i)[iPlaneID].first;
-	    //auto tick1 = pcaClusterPoint.at(i)[iPlaneID].second;
-	    //auto wire2 = pcaClusterPoint.at(j)[iPlaneID].first;
+      	    //auto wire1 = pcaClusterPoint.at(i)[iPlaneID].first;
+      	    //auto tick1 = pcaClusterPoint.at(i)[iPlaneID].second;
+      	    //auto wire2 = pcaClusterPoint.at(j)[iPlaneID].first;
             //auto tick2 = pcaClusterPoint.at(j)[iPlaneID].second;
-	    allPcaClusterPoint[ iPlaneID ].push_back( std::make_pair( pcaClusterPoint.at(i)[iPlaneID], pcaClusterPoint.at(j)[iPlaneID] ) );
-	  } // plane for pca1 pca2 combo
-	} // end pca2 loop
+	          allPcaClusterPoint[ iPlaneID ].push_back( std::make_pair( pcaClusterPoint.at(i)[iPlaneID], pcaClusterPoint.at(j)[iPlaneID] ) );
+	        } // plane for pca1 pca2 combo
+	      } // end pca2 loop
       } // end pca1 loop
     } // end loop reduced hit labels
 
@@ -577,67 +578,67 @@ void GaussHitRecovery::produce(art::Event& e)
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
       if ( e.getByLabel(iLabel,hitsHandle) ) {
-	art::fill_ptr_vector(hits,hitsHandle);
+	      art::fill_ptr_vector(hits,hitsHandle);
       }
       else{
-	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
+	      mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
         return;
       }
 
       for ( auto const& iHitPtr : hits ) {
         auto const& thisTime = iHitPtr->PeakTime();
         auto const& thisRMS = iHitPtr->RMS();
-	std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
+      	std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
 
-	// Check if the hit is already in the set of cluster3d hits and skip it if so
-	// TODO -- could try to do something better like this above too?
-	bool isReduc = false;
-	bool isSkippedPlane = false;
-	for ( auto const& iWire : wires ) {
-	  if ( fSkipRecoveryPlane == (int)iWire.Plane ) isSkippedPlane = true;
-	  if ( isReduc || isSkippedPlane ) break;
-	  if ( wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end() ) continue;
-	  for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
-	    if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
-	      isReduc = true;
-	      break;
-	    }
-	  }
-	}
-	if ( isReduc || isSkippedPlane ) continue; // if it's a reduced hit or on a plane we skip, don't try to save this hit again...
+      	// Check if the hit is already in the set of cluster3d hits and skip it if so
+      	// TODO -- could try to do something better like this above too?
+      	bool isReduc = false;
+      	bool isSkippedPlane = false;
+      	for ( auto const& iWire : wires ) {
+      	  if ( fSkipRecoveryPlane == (int)iWire.Plane ) isSkippedPlane = true;
+      	  if ( isReduc || isSkippedPlane ) break;
+      	  if ( wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end() ) continue;
+      	  for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
+      	    if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
+	            isReduc = true;
+	            break;
+      	    }
+      	  }
+      	}
+      	if ( isReduc || isSkippedPlane ) continue; // if it's a reduced hit or on a plane we skip, don't try to save...
 
-	// Consider both wire possibilities for hits in the overlap regions
+      	// Consider both wire possibilities for hits in the overlap regions
         for ( auto const& iWire : wires ) {
           auto const& thisWire = iWire.Wire;
           auto thisPlaneID = iWire.asPlaneID();
 
-	  // Loop through the wire,tick point combinations and figure out 
-	  // TODO: the other methods reclaim hits along the line, should there be similar method or something to recover outside of these here too?
-	  for ( unsigned int iPtPair = 0; iPtPair < allPcaClusterPoint[ thisPlaneID ].size(); ++iPtPair ) {
-	    bool firstIsLoWire;
-	    allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first < allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first ? firstIsLoWire = true : firstIsLoWire = false;
-	    float loWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first;
-	    float loWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second;
-	    float hiWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first;
-	    float hiWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second;
+	        // Loop through the wire,tick point combinations and figure out 
+	        // TODO: the other methods reclaim hits along the line, should there be similar method
+          //        or something to recover outside of these here too?
+	        for ( unsigned int iPtPair = 0; iPtPair < allPcaClusterPoint[ thisPlaneID ].size(); ++iPtPair ) {
+	          bool firstIsLoWire;
+	          allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first < allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first ? firstIsLoWire = true : firstIsLoWire = false;
+	          float loWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first;
+	          float loWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second;
+	          float hiWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first;
+	          float hiWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second;
 
-	    if ( thisWire < loWire || thisWire > hiWire ) continue; // only really useful if we're just looking to reclaim hits in the middle of tracks
+	          if ( thisWire < loWire || thisWire > hiWire ) continue; // only really useful if we're just looking to reclaim hits in the middle of tracks
 
-	    // make a simple line connecting these two:
-	    // m = (y2-y1) / (x2 - x1)
-	    float connectSlope = (hiWireTick - loWireTick) / (hiWire - loWire);
-	    // b = y1 - m*x1
-	    float connectInt = hiWireTick - (connectSlope * hiWire);
-	    // Is our hit within a tolerance of this line (fLinregTolerance)
-	    float tickExpect = (connectSlope * thisWire) + connectInt;
-	    if ( std::fabs(tickExpect-thisTime) > fLinregTolerance*thisRMS ) continue;
+	          // make a simple line connecting these two:
+	          // m = (y2-y1) / (x2 - x1)
+	          float connectSlope = (hiWireTick - loWireTick) / (hiWire - loWire);
+	          // b = y1 - m*x1
+	          float connectInt = hiWireTick - (connectSlope * hiWire);
+	          // Is our hit within a tolerance of this line (fLinregTolerance)
+	          float tickExpect = (connectSlope * thisWire) + connectInt;
+	          if ( std::fabs(tickExpect-thisTime) > fLinregTolerance*thisRMS ) continue;
 
-	    recob::Hit theHit = *iHitPtr;
-	    hitCol.emplace_back(std::move(theHit));
-	    break;
-	  } // end loop of point-pairs we're testing the hit against
-
-	} // end loop of wires for the hit
+	          recob::Hit theHit = *iHitPtr;
+	          hitCol.emplace_back(std::move(theHit));
+	          break;
+	        } // end loop of point-pairs we're testing the hit against
+	      } // end loop of wires for the hit
       } // end loop all hits
     } // end loop all hit labels
 
