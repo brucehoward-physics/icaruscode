@@ -80,6 +80,7 @@ private:
   bool fUseReducHitClusters;     // Instead of looking for the interesting points in the hit map, take an input set of clusters.
 
   bool fUseReducHitPCAxis;       // If true, this overrides the fUseReducHitClusters setting...
+  bool fPCAxisOnlyBetween;       // If true, only recover hits between 2 groupings on a plane, not along the extension
   float fPCAxisTolerance;        // Defines the anglular tolerance (in degrees) in PCAxis method.
 
   bool fTryAllMethods;           // Try all 3 methods
@@ -100,6 +101,7 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   fSkipRecoveryPlane      ( p.get<float>("SkipRecoveryPlane",-1) ),
   fUseReducHitClusters    ( p.get<bool>("UseReducedHitClusters",false) ),
   fUseReducHitPCAxis      ( p.get<bool>("UseReducedHitPCAxis",false) ),
+  fPCAxisOnlyBetween      ( p.get<bool>("PCAxisOnlyBetween"),false ),
   fPCAxisTolerance        ( p.get<float>("PCAxisTolerance",5.) ),
   fTryAllMethods          ( p.get<bool>("TryAllMethods",false) ),
   fTryAllMethodsMinSuccess( p.get<int>("TryAllMethodsMinSuccess",3) )
@@ -624,6 +626,8 @@ void GaussHitRecovery::produce(art::Event& e)
 	          float hiWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second;
 
 	          if ( thisWire < loWire || thisWire > hiWire ) continue; // only really useful if we're just looking to reclaim hits in the middle of tracks
+            // if we only want to use hits between 2 groups
+	          if ( fPCAxisOnlyBetween && (thisWire < loWire || thisWire > hiWire) ) continue;
 
 	          // make a simple line connecting these two:
 	          // m = (y2-y1) / (x2 - x1)
