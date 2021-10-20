@@ -375,17 +375,17 @@ void GaussHitRecovery::produce(art::Event& e)
     printInfo += thisPlaneID.toString() + " linreg = ";
     if ( linregNeighbors.find(thisPlaneID)==linregNeighbors.end() ) {
       printInfo += "0 ";
-      totLinRegN += linregNeighbors[thisPlaneID].size();
     }
     else {
       printInfo += std::to_string(linregNeighbors[thisPlaneID].size()) + " ";
+      totLinRegN += linregNeighbors[thisPlaneID].size();
     }
     if ( linregClusters.find(thisPlaneID)==linregClusters.end() ) {
       printInfo += "0";
-      totLinRegC += linregClusters[thisPlaneID].size();
     }
     else {
       printInfo += std::to_string(linregClusters[thisPlaneID].size());
+      totLinRegC += linregClusters[thisPlaneID].size();
     }
     printInfo += "\n ";
   }
