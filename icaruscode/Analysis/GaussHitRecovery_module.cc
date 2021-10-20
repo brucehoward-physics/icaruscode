@@ -273,7 +273,7 @@ void GaussHitRecovery::produce(art::Event& e)
   } // end fUseFindNeighbors
 
   // if fUseReducHitClusters then use the hit assns to recob::Cluster
-  else if ( fUseReducHitClusters ) {
+  if ( fUseReducHitClusters ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       // Hit set
       art::Handle< std::vector<recob::Hit> > hitsHandle;
