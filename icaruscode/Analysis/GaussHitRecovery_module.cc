@@ -30,6 +30,8 @@
 
 #include "lardata/ArtDataHelper/HitCreator.h"
 
+#include "cetlib_except/exception.h"
+
 // C++
 #include <map>
 #include <vector>
@@ -77,14 +79,16 @@ private:
   float fLinregTolerance;
   int fSkipRecoveryPlane;
 
+  bool fUseFindNeighbors;           // Default method. Look for interesting points in the hit map.
+
   bool fUseReducHitClusters;     // Instead of looking for the interesting points in the hit map, take an input set of clusters.
 
   bool fUseReducHitPCAxis;       // If true, this overrides the fUseReducHitClusters setting...
   bool fPCAxisOnlyBetween;       // If true, only recover hits between 2 groupings on a plane, not along the extension
   float fPCAxisTolerance;        // Defines the anglular tolerance (in degrees) in PCAxis method.
 
-  bool fTryAllMethods;           // Try all 3 methods
-  bool fTryAllMethodsMinSuccess; // If trying all 3 methods, then how many does a hit need to pass to be saved (default all 3)
+  bool fMinMethodsSuccess; // how many methods does a hit need to pass to be saved 
+                           // (default "0" - a hit still has to be registed to save though)
 };
 
 
@@ -99,18 +103,25 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   fMaxChi2NDF             ( p.get<float>("MaxChi2NDF",11.) ),
   fLinregTolerance        ( p.get<float>("LinregTolerance",1.) ),
   fSkipRecoveryPlane      ( p.get<float>("SkipRecoveryPlane",-1) ),
+  fUseFindNeighbors       ( p.get<bool>("UseFindNeighbors",true) ),
   fUseReducHitClusters    ( p.get<bool>("UseReducedHitClusters",false) ),
   fUseReducHitPCAxis      ( p.get<bool>("UseReducedHitPCAxis",false) ),
   fPCAxisOnlyBetween      ( p.get<bool>("PCAxisOnlyBetween",false) ),
   fPCAxisTolerance        ( p.get<float>("PCAxisTolerance",5.) ),
-  fTryAllMethods          ( p.get<bool>("TryAllMethods",false) ),
-  fTryAllMethodsMinSuccess( p.get<int>("TryAllMethodsMinSuccess",3) )
+  fMinMethodsSuccess      ( p.get<int>("MethodsMinSuccess",0) )
 {
   // Call appropriate consumes<>() for any products to be retrieved by this module.
   // NOTE ?? - is it not okay to do what I'm doing below to get the hits to decide amongst?
 
   // Override fUseReducHitClusters if fUseReducHitPCAxis
-  if( fUseReducHitPCAxis ) fUseReducHitClusters = false;
+  int usingNeighbors = fUseFindNeighbors    ? 1 : 0;
+  int usingClusters  = fUseReducHitClusters ? 1 : 0;
+  int usingPCAxis    = fUseReducHitPCAxis   ? 1 : 0;
+  int numMethods = usingNeighbors + usingClusters + usingPCAxis;
+  if ( numMethods==0 )
+    throw cet::exception("GaussHitRecovery") << "Trying to run HitRecovery with no methods activated... !\n";
+  if ( numMethods < fMinMethodsSuccess )
+    throw cet::exception("GaussHitRecovery") << "Too few methods run compared to ask for MinMethodsSuccess... !\n";
 
   // Following exception and declaration come from the GausHitFinder, with some alterations as needed.
   if (art::Globals::instance()->nthreads() > 1u) {
@@ -174,8 +185,7 @@ void GaussHitRecovery::produce(art::Event& e)
   std::map< geo::PlaneID, std::vector< std::pair<double,double> > > linregNeighbors;
   std::map< geo::PlaneID, std::vector< std::pair<double,double> > > linregClusters;
 
-  // if !fUseReducHitClusters then consider all the reduced hits and look for clusters
-  if ( fTryAllMethods || (!fUseReducHitPCAxis && !fUseReducHitClusters) ) {
+  if ( fUseFindNeighbors ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
@@ -263,7 +273,7 @@ void GaussHitRecovery::produce(art::Event& e)
   } // end !fUseReducHitClusters
 
   // if fUseReducHitClusters then use the hit assns to recob::Cluster
-  else if ( fTryAllMethods || fUseReducHitClusters ) {
+  else if ( fUseReducHitClusters ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       // Hit set
       art::Handle< std::vector<recob::Hit> > hitsHandle;
@@ -485,7 +495,7 @@ void GaussHitRecovery::produce(art::Event& e)
   // Then there are a vector of these per plane for the event.
   std::map< geo::PlaneID, std::vector< std::pair< std::pair<float,float>, std::pair<float,float> > > >    allPcaClusterPoint;
 
-  if ( fTryAllMethods || fUseReducHitPCAxis ) {
+  if ( fUseReducHitPCAxis ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
@@ -615,7 +625,7 @@ void GaussHitRecovery::produce(art::Event& e)
     // Print out how many entries we have per plane in the linreg saver:
     std::string printInfo = "Processing:\n ";
     for( geo::PlaneID const& thisPlaneID : fGeom->IteratePlaneIDs() ){
-      printInfo += thisPlaneID.toString() + " linreg = ";
+      printInfo += thisPlaneID.toString() + " pcaxis groupings = ";
       if ( allPcaClusterPoint.find(thisPlaneID)==allPcaClusterPoint.end() )
         printInfo += "0 ";
       else
@@ -716,12 +726,12 @@ void GaussHitRecovery::produce(art::Event& e)
   for ( auto const& iHitPtr : hitsPossiblyRecovered ) {
     auto const& thisWireID = iHitPtr->WireID();
     float thisWireTick = iHitPtr->PeakTime();
-    // If checking how many hits this method passed, do the check
-    if ( fTryAllMethods &&
+    // Require at least fMinMethodsSuccess methods to have found the hit for it to be recovered. Allows to use
+    // a combination of algorithms
+    if ( fMinMethodsSuccess>=1 && 
          hitToRecoveryMethodMap.find( std::make_pair(thisWireID,thisWireTick) )==hitToRecoveryMethodMap.end() )
       continue;
-    if ( fTryAllMethods &&
-         hitToRecoveryMethodMap[ std::make_pair(thisWireID,thisWireTick) ].size()<fTryAllMethodsMinSuccess )
+    if ( hitToRecoveryMethodMap[ std::make_pair(thisWireID,thisWireTick) ].size()<fMinMethodsSuccess )
       continue;
     recob::Hit theHit = *iHitPtr;
     hitCol.emplace_back(std::move(theHit));
