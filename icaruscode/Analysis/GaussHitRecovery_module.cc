@@ -581,12 +581,6 @@ void GaussHitRecovery::produce(art::Event& e)
       	pcaMagnitudes.push_back( (float)ax1val[2] );
       }
 
-      // TEST ME
-      //for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
-      //  std::cout << "Plane " << iPlaneID.toString() << " -- View " << fGeom->Plane(iPlaneID).View() << std::endl;
-      //}
-      // END TEST
-
       // Look at the PCAs:
       // The objects pcaClusterPoint, pcaVectors, pcaMagnitudes should all line up in terms of entries, so can be matched
       // Then, assign any matches to the overall map's vectors
@@ -617,6 +611,18 @@ void GaussHitRecovery::produce(art::Event& e)
 	      } // end pca2 loop
       } // end pca1 loop
     } // end loop reduced hit labels
+
+    // Print out how many entries we have per plane in the linreg saver:
+    std::string printInfo = "Processing:\n ";
+    for( geo::PlaneID const& thisPlaneID : fGeom->IteratePlaneIDs() ){
+      printInfo += thisPlaneID.toString() + " linreg = ";
+      if ( allPcaClusterPoint.find(thisPlaneID)==allPcaClusterPoint.end() )
+        printInfo += "0 ";
+      else
+        printInfo += std::to_string(allPcaClusterPoint[ thisPlaneID ].size()) + " ";
+      printInfo += "\n ";
+    }
+    mf::LogWarning("GaussHitRecovery") << printInfo;
 
     // Now loop through all hits and see if we want to recover them:
     for ( auto const& iLabel : fHitsLabelVec ) {
