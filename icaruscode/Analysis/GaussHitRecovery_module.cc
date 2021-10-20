@@ -426,17 +426,17 @@ void GaussHitRecovery::produce(art::Event& e)
 	              // Put the hit into the recovered hit vector if it's not already registered
                 if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
                   hitsPossiblyRecovered.push_back( iHitPtr );
-                  hitToRecoveryMethodMap[ iWire ].push_back(1);
+                  hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(1);
                 }
                 else {
                   bool alreadyThisMethod = false;
-                  for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ iWire ] ) {
+                  for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ] ) {
                     if ( recoveryMethod==1 ) {
                       alreadyThisMethod = true;
                       break;
                     }
                   }
-                  if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ iWire ].push_back(1);
+                  if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(1);
                 }
                 hitFound = true;
 	              break;
@@ -451,17 +451,17 @@ void GaussHitRecovery::produce(art::Event& e)
                 // Put the hit into the recovered hit vector if it's not already registered
                 if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
                   hitsPossiblyRecovered.push_back( iHitPtr );
-                  hitToRecoveryMethodMap[ iWire ].push_back(0);
+                  hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(0);
                 }
                 else {
                   bool alreadyThisMethod = false;
-                  for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ iWire ] ) {
+                  for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ] ) {
                     if ( recoveryMethod==0 ) {
                       alreadyThisMethod = true;
                       break;
                     }
                   }
-                  if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ iWire ].push_back(0);
+                  if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(0);
                 }
                 hitFound = true;
 	              break;
@@ -689,17 +689,17 @@ void GaussHitRecovery::produce(art::Event& e)
             // Put the hit into the recovered hit vector if it's not already registered
             if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
               hitsPossiblyRecovered.push_back( iHitPtr );
-              hitToRecoveryMethodMap[ iWire ].push_back(2);
+              hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(2);
             }
             else {
               bool alreadyThisMethod = false;
-              for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ iWire ] ) {
+              for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ] ) {
                 if ( recoveryMethod==2 ) {
                   alreadyThisMethod = true;
                   break;
                 }
               }
-              if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ iWire ].push_back(2);
+              if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(2);
             }
 	          break;
 	        } // end loop of point-pairs we're testing the hit against
