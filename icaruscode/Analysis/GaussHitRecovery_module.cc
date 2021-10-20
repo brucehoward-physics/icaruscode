@@ -77,10 +77,13 @@ private:
   float fLinregTolerance;
   int fSkipRecoveryPlane;
 
-  bool fUseReducHitClusters; // Instead of looking for the interesting points in the hit map, take an input set of clusters.
+  bool fUseReducHitClusters;     // Instead of looking for the interesting points in the hit map, take an input set of clusters.
 
-  bool fUseReducHitPCAxis;   // If true, this overrides the fUseReducHitClusters setting...
-  float fPCAxisTolerance;    // Defines the anglular tolerance (in degrees) in PCAxis method.
+  bool fUseReducHitPCAxis;       // If true, this overrides the fUseReducHitClusters setting...
+  float fPCAxisTolerance;        // Defines the anglular tolerance (in degrees) in PCAxis method.
+
+  bool fTryAllMethods;           // Try all 3 methods
+  bool fTryAllMethodsMinSuccess; // If trying all 3 methods, then how many does a hit need to pass to be saved (default all 3)
 };
 
 
@@ -97,7 +100,9 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   fSkipRecoveryPlane      ( p.get<float>("SkipRecoveryPlane",-1) ),
   fUseReducHitClusters    ( p.get<bool>("UseReducedHitClusters",false) ),
   fUseReducHitPCAxis      ( p.get<bool>("UseReducedHitPCAxis",false) ),
-  fPCAxisTolerance        ( p.get<float>("PCAxisTolerance",5.) )
+  fPCAxisTolerance        ( p.get<float>("PCAxisTolerance",5.) ),
+  fTryAllMethods          ( p.get<bool>("TryAllMethods",false) ),
+  fTryAllMethodsMinSuccess( p.get<int>("TryAllMethodsMinSuccess",3) )
 {
   // Call appropriate consumes<>() for any products to be retrieved by this module.
   // NOTE ?? - is it not okay to do what I'm doing below to get the hits to decide amongst?
@@ -116,6 +121,12 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
 
 void GaussHitRecovery::produce(art::Event& e)
 {
+  // TO DO: Use the hitToRecoveryMethodMap and related vector with the methods to have a TryAll version
+  //  -- To do this, I need to split out the first/second methods to separate instances of the linear regression as well...
+
+  // TO DO: Try to extend the PCAxis method to not just pick up hits in between clusters but also projected along from them
+  //   -- Possibly only try this if it does recover hits in the middle?
+
   // -- As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc) but with assns turned off
   recob::HitCollectionCreator hitCol(e, fHitCreatorInstanceName, false, false);
 
@@ -142,7 +153,8 @@ void GaussHitRecovery::produce(art::Event& e)
   }
 
   // Make a map of std::pair< WireID, Tick > with the second being a string of the methods so that I can then choose multipe recovery methods at once?
-  // Fix bug in SkipRecoveryPlane in the PCAxis recovery method...
+  //std::map< std::pair< geo::WireID, float >, std::vector<int> > hitToRecoveryMethodMap; // map of pair <WireID, tick> to a vector of the recovery methods
+  //std::vector< std::pair< geo::WireID, float > >                hitsPossiblyRecovered;  // any hits recovered (will also be registered in map)
 
 
   // -- Method explored in the HitRecoveryAnalysis module
@@ -423,10 +435,10 @@ void GaussHitRecovery::produce(art::Event& e)
   // each other...
 
   std::map< geo::PlaneID, std::vector< std::pair<TVector3,TVector3> > >             allPcaVectors;
-  std::map< geo::PlaneID, std::vector< std::pair<double,double> > >                 allPcaMagnitudes;
+  std::map< geo::PlaneID, std::vector< std::pair<float,float> > >                   allPcaMagnitudes;
   // A pair of pair of doubles -> wire,tick for pca1 (.first.{first,second}) & wire, tick for pca2 (.second.{first,second})
   // Then there are a vector of these per plane for the event.
-  std::map< geo::PlaneID, std::vector< std::pair< std::pair<double,double>, std::pair<double,double> > > >    allPcaClusterPoint; // a point relating to cluster (wire,tick)
+  std::map< geo::PlaneID, std::vector< std::pair< std::pair<float,float>, std::pair<float,float> > > >    allPcaClusterPoint; // a point relating to cluster (wire,tick)
 
   if ( fUseReducHitPCAxis ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
@@ -482,11 +494,11 @@ void GaussHitRecovery::produce(art::Event& e)
       }
 
       std::vector<TVector3> pcaVectors;
-      std::vector<double> pcaMagnitudes;
-      std::vector< std::map< geo::PlaneID, std::pair<double,double> > > pcaClusterPoint; // a point relating to cluster
+      std::vector<float> pcaMagnitudes;
+      std::vector< std::map< geo::PlaneID, std::pair<float,float> > > pcaClusterPoint; // a point relating to cluster
 
       for ( auto const& iPFP : pfps ) {
-	std::map< geo::PlaneID, std::pair<double,double> > thisPcaClusterPoint;
+	std::map< geo::PlaneID, std::pair<float,float> > thisPcaClusterPoint;
 
 	std::vector< art::Ptr<recob::Cluster> > clst = fmcl.at(iPFP.key());
 	//std::cout << "pfp matches " << clst.size() << " clusters" << std::endl;
@@ -521,7 +533,7 @@ void GaussHitRecovery::produce(art::Event& e)
 	TVector3 pcaV(ax1vec[2].at(0),ax1vec[2].at(1),ax1vec[2].at(2));
 	pcaVectors.push_back(pcaV);
 
-	pcaMagnitudes.push_back( (double)ax1val[2] );
+	pcaMagnitudes.push_back( (float)ax1val[2] );
       }
 
       // TEST ME
@@ -604,20 +616,20 @@ void GaussHitRecovery::produce(art::Event& e)
 	  for ( unsigned int iPtPair = 0; iPtPair < allPcaClusterPoint[ thisPlaneID ].size(); ++iPtPair ) {
 	    bool firstIsLoWire;
 	    allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first < allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first ? firstIsLoWire = true : firstIsLoWire = false;
-	    double loWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first;
-	    double loWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second;
-	    double hiWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first;
-	    double hiWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second;
+	    float loWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first;
+	    float loWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second;
+	    float hiWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first;
+	    float hiWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second;
 
 	    if ( thisWire < loWire || thisWire > hiWire ) continue; // only really useful if we're just looking to reclaim hits in the middle of tracks
 
 	    // make a simple line connecting these two:
 	    // m = (y2-y1) / (x2 - x1)
-	    double connectSlope = (hiWireTick - loWireTick) / (hiWire - loWire);
+	    float connectSlope = (hiWireTick - loWireTick) / (hiWire - loWire);
 	    // b = y1 - m*x1
-	    double connectInt = hiWireTick - (connectSlope * hiWire);
+	    float connectInt = hiWireTick - (connectSlope * hiWire);
 	    // Is our hit within a tolerance of this line (fLinregTolerance)
-	    double tickExpect = (connectSlope * thisWire) + connectInt;
+	    float tickExpect = (connectSlope * thisWire) + connectInt;
 	    if ( std::fabs(tickExpect-thisTime) > fLinregTolerance*thisRMS ) continue;
 
 	    recob::Hit theHit = *iHitPtr;
@@ -630,6 +642,19 @@ void GaussHitRecovery::produce(art::Event& e)
     } // end loop all hit labels
 
   } // end if fUseReducHitPCAxis
+
+  // Now fill up the recovered hits
+  /*
+  for ( auto const& iHitPtr : hitsPossiblyRecovered ) {
+    auto const& thisWireID = iHitPtr->WireID();
+    float thisWireTick = iHitPtr->PeakTime();
+    // If checking how many hits this method passed, do the check
+    if ( fTryAllMethods && hitToRecoveryMethodMap.find( std::make_pair(thisWireID,thisWireTick) )==hitToRecoveryMethodMap.end() ) continue;
+    if ( fTryAllMethods && hitToRecoveryMethodMap[ std::make_pair(thisWireID,thisWireTick) ].size()<fTryAllMethodsMinSuccess ) continue;
+    recob::Hit theHit = *iHitPtr;
+    hitCol.emplace_back(std::move(theHit));
+  }
+  */
 
   hitCol.put_into(e);
 }
