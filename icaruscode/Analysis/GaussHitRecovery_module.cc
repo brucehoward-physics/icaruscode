@@ -414,7 +414,6 @@ void GaussHitRecovery::produce(art::Event& e)
       	if ( isReduc || isSkippedPlane ) continue; // if it's a reduced hit or on a plane we skip, don't try to save...
 
       	for ( auto const& iWire : wires ) {
-          bool hitFound = false;
       	  auto const& thisWire = iWire.Wire;
 
       	  // loop through the linreg for this PlaneID and see if the hit is consistent with one of them
@@ -438,13 +437,12 @@ void GaussHitRecovery::produce(art::Event& e)
                   }
                   if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(1);
                 }
-                hitFound = true;
 	              break;
 	            }
     	      } // loop linear regressions (clusters) for this plane
           }
           // Second the Neighbors LinReg if any:
-          if ( !hitFound && linregNeighbors.find(iWire.asPlaneID()) != linregNeighbors.end() ) {
+          if ( linregNeighbors.find(iWire.asPlaneID()) != linregNeighbors.end() ) {
         	  for ( auto const& iLine : linregNeighbors[iWire.asPlaneID()] ) {
          	    double expect = iLine.first*thisWire + iLine.second;
         	    if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
@@ -463,7 +461,6 @@ void GaussHitRecovery::produce(art::Event& e)
                   }
                   if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(0);
                 }
-                hitFound = true;
 	              break;
 	            }
     	      } // loop linear regressions (clusters) for this plane
