@@ -394,6 +394,9 @@ void GaussHitRecovery::produce(art::Event& e)
       	auto const& thisTime = iHitPtr->PeakTime();
       	auto const& thisRMS = iHitPtr->RMS();
 
+        // Get the WireIDs matching to the Channel of this hit (can be >1, e.g. in the overlap region near middle)
+        std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
+
         // Check if the hit is already in reduced set and/or if we're skipping this plane
         bool isReduc = false;
       	bool isSkippedPlane = false;
@@ -410,12 +413,9 @@ void GaussHitRecovery::produce(art::Event& e)
       	}
       	if ( isReduc || isSkippedPlane ) continue; // if it's a reduced hit or on a plane we skip, don't try to save...
 
-      	std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
       	for ( auto const& iWire : wires ) {
           bool hitFound = false;
-
       	  auto const& thisWire = iWire.Wire;
-      	  auto const& thisPlane = iWire.Plane;
 
       	  // loop through the linreg for this PlaneID and see if the hit is consistent with one of them
           // First the Clusters LinReg if any:
