@@ -101,7 +101,7 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   fSkipRecoveryPlane      ( p.get<float>("SkipRecoveryPlane",-1) ),
   fUseReducHitClusters    ( p.get<bool>("UseReducedHitClusters",false) ),
   fUseReducHitPCAxis      ( p.get<bool>("UseReducedHitPCAxis",false) ),
-  fPCAxisOnlyBetween      ( p.get<bool>("PCAxisOnlyBetween"),false ),
+  fPCAxisOnlyBetween      ( p.get<bool>("PCAxisOnlyBetween",false) ),
   fPCAxisTolerance        ( p.get<float>("PCAxisTolerance",5.) ),
   fTryAllMethods          ( p.get<bool>("TryAllMethods",false) ),
   fTryAllMethodsMinSuccess( p.get<int>("TryAllMethodsMinSuccess",3) )
