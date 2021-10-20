@@ -123,12 +123,6 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
 
 void GaussHitRecovery::produce(art::Event& e)
 {
-  // TO DO: Use the hitToRecoveryMethodMap and related vector with the methods to have a TryAll version
-  //  -- To do this, I need to split out the first/second methods to separate instances of the linear regression as well...
-
-  // TO DO: Try to extend the PCAxis method to not just pick up hits in between clusters but also projected along from them
-  //   -- Possibly only try this if it does recover hits in the middle?
-
   // -- As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc) but with assns turned off
   recob::HitCollectionCreator hitCol(e, fHitCreatorInstanceName, false, false);
 
@@ -154,10 +148,13 @@ void GaussHitRecovery::produce(art::Event& e)
     }
   }
 
-  // Make a map of std::pair< WireID, Tick > with the second being a string of the methods so that I can then choose multipe recovery methods at once?
-  //std::map< std::pair< geo::WireID, float >, std::vector<int> > hitToRecoveryMethodMap; // map of pair <WireID, tick> to a vector of the recovery methods
-  //std::vector< std::pair< geo::WireID, float > >                hitsPossiblyRecovered;  // any hits recovered (will also be registered in map)
-
+  // Make a map of std::pair< WireID, Tick > with the second being a string of the methods so that one can then choose 
+  // multipe recovery methods at once
+  // TODO: is the RMS info needed along with the tick to guarantee we get a unique hit, i.e. not just wireid and tick?
+  // Part 1: map of pair <WireID, tick> to a vector of the recovery methods
+  std::map< std::pair< geo::WireID, float >, std::vector<int> > hitToRecoveryMethodMap;
+  // Part 2: any hits recovered (will also be registered in map)
+  std::vector< art::Ptr<recob::Hit> >                           hitsPossiblyRecovered;
 
   // -- Method explored in the HitRecoveryAnalysis module
   // Geometry
@@ -172,13 +169,13 @@ void GaussHitRecovery::produce(art::Event& e)
   // For all hits: use the hit->Channel->WireIDVector to get the possible matches
   // For reduced hits: since a choice of the hit location has already been made in the 3d match, here we just use the hit->WireID
 
-  // TODO: right now this means recovered hits can be double-counted... Would need to add some way to force only picking one. But probably a hit being claimed in both
-  //       possibilities would be pretty small?
+  // NOTE: I think using this vector means that hits are only counted once even if both wire possibilities in overlap are met?
 
-  std::map< geo::PlaneID, std::vector< std::pair<double,double> > > linreg;
+  std::map< geo::PlaneID, std::vector< std::pair<double,double> > > linregNeighbors;
+  std::map< geo::PlaneID, std::vector< std::pair<double,double> > > linregClusters;
 
   // if !fUseReducHitClusters then consider all the reduced hits and look for clusters
-  if ( !fUseReducHitPCAxis && !fUseReducHitClusters ) {
+  if ( fTryAllMethods || (!fUseReducHitPCAxis && !fUseReducHitClusters) ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
@@ -260,13 +257,13 @@ void GaussHitRecovery::produce(art::Event& e)
 	
       	if( chi2ndf > fMaxChi2NDF ) continue;
 	
-	      linreg[ wID.asPlaneID() ].push_back( std::make_pair(slope,intercept) );
+	      linregNeighbors[ wID.asPlaneID() ].push_back( std::make_pair(slope,intercept) );
       } // loop hits
     } // loop hit labels
   } // end !fUseReducHitClusters
 
   // if fUseReducHitClusters then use the hit assns to recob::Cluster
-  else if ( fUseReducHitClusters ) {
+  else if ( fTryAllMethods || fUseReducHitClusters ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       // Hit set
       art::Handle< std::vector<recob::Hit> > hitsHandle;
@@ -354,26 +351,34 @@ void GaussHitRecovery::produce(art::Event& e)
 	  
       	  if( chi2ndf > fMaxChi2NDF ) continue;
 	  
-      	  linreg[ iPlaneID ].push_back( std::make_pair(slope,intercept) );
+      	  linregClusters[ iPlaneID ].push_back( std::make_pair(slope,intercept) );
       	} // loop planeIDs
       } // loop clusters
     } // loop hit labels
   }
 
   // Print out how many entries we have per plane in the linreg saver:
-  unsigned int totLinReg = 0;
+  unsigned int totLinRegN = 0;
+  unsigned int totLinRegC = 0;
   std::string printInfo = "Processing:\n ";
   for( geo::PlaneID const& thisPlaneID : fGeom->IteratePlaneIDs() ){
     printInfo += thisPlaneID.toString() + " linreg = ";
-    if ( linreg.find(thisPlaneID)==linreg.end() ) printInfo += "0";
-    else                                          printInfo += std::to_string(linreg[thisPlaneID].size());
+    if ( linregNeighbors.find(thisPlaneID)==linregNeighbors.end() )
+      printInfo += "0 ";
+    else
+      printInfo += std::to_string(linregNeighbors[thisPlaneID].size()) + " ";
+    if ( linregClusters.find(thisPlaneID)==linregClusters.end() )
+      printInfo += "0";
+    else
+      printInfo += std::to_string(linregClusters[thisPlaneID].size());
     printInfo += "\n ";
-    totLinReg += linreg[thisPlaneID].size();
+    totLinRegN += linregNeighbors[thisPlaneID].size();
+    totLinRegC += linregClusters[thisPlaneID].size();
   }
   mf::LogWarning("GaussHitRecovery") << printInfo;
 
-  // All hits, save some as the recovered hits
-  if ( totLinReg > 0 ){
+  // All hits, save some as the recovered hits. The LinReg counts should only be >0 if that method is "enabled"
+  if ( totLinRegN > 0 || totLinRegC > 0 ){
     for ( auto const& iLabel : fHitsLabelVec ) {
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
@@ -388,38 +393,81 @@ void GaussHitRecovery::produce(art::Event& e)
       for ( auto const& iHitPtr : hits ) {
       	auto const& thisTime = iHitPtr->PeakTime();
       	auto const& thisRMS = iHitPtr->RMS();
+
+        // Check if the hit is already in reduced set and/or if we're skipping this plane
+        bool isReduc = false;
+      	bool isSkippedPlane = false;
+      	for ( auto const& iWire : wires ) {
+      	  if ( fSkipRecoveryPlane == (int)iWire.Plane ) isSkippedPlane = true;
+      	  if ( isReduc || isSkippedPlane ) break;
+      	  if ( wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end() ) continue;
+      	  for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
+      	    if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
+	            isReduc = true;
+	            break;
+      	    }
+      	  }
+      	}
+      	if ( isReduc || isSkippedPlane ) continue; // if it's a reduced hit or on a plane we skip, don't try to save...
+
       	std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
       	for ( auto const& iWire : wires ) {
+          bool hitFound = false;
+
       	  auto const& thisWire = iWire.Wire;
       	  auto const& thisPlane = iWire.Plane;
-	
-      	  if ( fSkipRecoveryPlane == (int)thisPlane ) continue;
-
-      	  // if no linreg on this plane then skip
-      	  if( linreg.find(iWire.asPlaneID()) == linreg.end() ) continue;
 
       	  // loop through the linreg for this PlaneID and see if the hit is consistent with one of them
-      	  for ( auto const& iLine : linreg[iWire.asPlaneID()] ) {
-       	    double expect = iLine.first*thisWire + iLine.second;
-      	    if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
-      	      // Check if the hit is already in the set of cluster3d hits and skip it if so
-      	      bool isReduc = false;
-      	      if ( !(wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end()) ) {
-            		// Now check this wire's hits for something with the same tick and RMS
-		            for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
-	            	  if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
-	            	    isReduc = true;
-	            	    break;
-	            	  }
-	            	}
-      	      }
-	            if ( isReduc ) break;
-	            // Put the hit into the recovered hit vector
-	            recob::Hit theHit = *iHitPtr;
-	            hitCol.emplace_back(std::move(theHit));
-	            break;
-	          }
-    	    } // loop linear regressions for this plane
+          // First the Clusters LinReg if any:
+          if( linregClusters.find(iWire.asPlaneID()) != linregClusters.end() ) {
+        	  for ( auto const& iLine : linregClusters[iWire.asPlaneID()] ) {
+         	    double expect = iLine.first*thisWire + iLine.second;
+        	    if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
+	              // Put the hit into the recovered hit vector if it's not already registered
+                if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
+                  hitsPossiblyRecovered.push_back( iHitPtr );
+                  hitToRecoveryMethodMap[ iWire ].push_back(1);
+                }
+                else {
+                  bool alreadyThisMethod = false;
+                  for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ iWire ] ) {
+                    if ( recoveryMethod==1 ) {
+                      alreadyThisMethod = true;
+                      break;
+                    }
+                  }
+                  if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ iWire ].push_back(1);
+                }
+                hitFound = true;
+	              break;
+	            }
+    	      } // loop linear regressions (clusters) for this plane
+          }
+          // Second the Neighbors LinReg if any:
+          if ( !hitFound && linregNeighbors.find(iWire.asPlaneID()) != linregNeighbors.end() ) {
+        	  for ( auto const& iLine : linregNeighbors[iWire.asPlaneID()] ) {
+         	    double expect = iLine.first*thisWire + iLine.second;
+        	    if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
+                // Put the hit into the recovered hit vector if it's not already registered
+                if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
+                  hitsPossiblyRecovered.push_back( iHitPtr );
+                  hitToRecoveryMethodMap[ iWire ].push_back(0);
+                }
+                else {
+                  bool alreadyThisMethod = false;
+                  for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ iWire ] ) {
+                    if ( recoveryMethod==0 ) {
+                      alreadyThisMethod = true;
+                      break;
+                    }
+                  }
+                  if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ iWire ].push_back(0);
+                }
+                hitFound = true;
+	              break;
+	            }
+    	      } // loop linear regressions (clusters) for this plane
+          }
     	  } // loop wires matching to the channel in the hit
       } // loop hits
     } // loop hit labels
@@ -429,20 +477,18 @@ void GaussHitRecovery::produce(art::Event& e)
   // RECOVERY ALG TYPE 2
   ////////////////////////////////////
 
-  // If fUseReducHit we will only use byproducts of Reduced hits, so simply
-  // get the Reduced Hits and copy them to hit col, and then move on to comparing
-  // the full hit set to the PCAAxes.
+  // If fUseReducHit we will only use byproducts of Reduced hits, so simply get the Reduced Hits and
+  // copy them to hit col, and then move on to comparing the full hit set to the PCAAxes.
   //
-  // Idea is to look for hits in the full set that are between two clusters pointing at
-  // each other...
+  // Idea is to look for hits in the full set that are between two clusters pointing at each other...
 
   std::map< geo::PlaneID, std::vector< std::pair<TVector3,TVector3> > >             allPcaVectors;
   std::map< geo::PlaneID, std::vector< std::pair<float,float> > >                   allPcaMagnitudes;
   // A pair of pair of doubles -> wire,tick for pca1 (.first.{first,second}) & wire, tick for pca2 (.second.{first,second})
   // Then there are a vector of these per plane for the event.
-  std::map< geo::PlaneID, std::vector< std::pair< std::pair<float,float>, std::pair<float,float> > > >    allPcaClusterPoint; // a point relating to cluster (wire,tick)
+  std::map< geo::PlaneID, std::vector< std::pair< std::pair<float,float>, std::pair<float,float> > > >    allPcaClusterPoint;
 
-  if ( fUseReducHitPCAxis ) {
+  if ( fTryAllMethods || fUseReducHitPCAxis ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       art::Handle< std::vector<recob::Hit> > hitsHandle;
       std::vector< art::Ptr<recob::Hit> > hits;
@@ -592,9 +638,8 @@ void GaussHitRecovery::produce(art::Event& e)
         auto const& thisRMS = iHitPtr->RMS();
       	std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
 
-      	// Check if the hit is already in the set of cluster3d hits and skip it if so
-      	// TODO -- could try to do something better like this above too?
-      	bool isReduc = false;
+        // Check if the hit is already in reduced set and/or if we're skipping this plane
+        bool isReduc = false;
       	bool isSkippedPlane = false;
       	for ( auto const& iWire : wires ) {
       	  if ( fSkipRecoveryPlane == (int)iWire.Plane ) isSkippedPlane = true;
@@ -618,14 +663,17 @@ void GaussHitRecovery::produce(art::Event& e)
 	        // TODO: the other methods reclaim hits along the line, should there be similar method
           //        or something to recover outside of these here too?
 	        for ( unsigned int iPtPair = 0; iPtPair < allPcaClusterPoint[ thisPlaneID ].size(); ++iPtPair ) {
-	          bool firstIsLoWire;
-	          allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first < allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first ? firstIsLoWire = true : firstIsLoWire = false;
-	          float loWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first;
-	          float loWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second;
-	          float hiWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first;
-	          float hiWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second : allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second;
+	          bool firstIsLoWire = (allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first <
+                                  allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first) ? true : false;
+	          float loWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first : 
+                                               allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first;
+	          float loWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second : 
+                                               allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second;
+	          float hiWire     = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first :
+                                               allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first;
+	          float hiWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second :
+                                               allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second;
 
-	          if ( thisWire < loWire || thisWire > hiWire ) continue; // only really useful if we're just looking to reclaim hits in the middle of tracks
             // if we only want to use hits between 2 groups
 	          if ( fPCAxisOnlyBetween && (thisWire < loWire || thisWire > hiWire) ) continue;
 
@@ -638,8 +686,21 @@ void GaussHitRecovery::produce(art::Event& e)
 	          float tickExpect = (connectSlope * thisWire) + connectInt;
 	          if ( std::fabs(tickExpect-thisTime) > fLinregTolerance*thisRMS ) continue;
 
-	          recob::Hit theHit = *iHitPtr;
-	          hitCol.emplace_back(std::move(theHit));
+            // Put the hit into the recovered hit vector if it's not already registered
+            if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
+              hitsPossiblyRecovered.push_back( iHitPtr );
+              hitToRecoveryMethodMap[ iWire ].push_back(2);
+            }
+            else {
+              bool alreadyThisMethod = false;
+              for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ iWire ] ) {
+                if ( recoveryMethod==2 ) {
+                  alreadyThisMethod = true;
+                  break;
+                }
+              }
+              if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ iWire ].push_back(2);
+            }
 	          break;
 	        } // end loop of point-pairs we're testing the hit against
 	      } // end loop of wires for the hit
@@ -649,17 +710,19 @@ void GaussHitRecovery::produce(art::Event& e)
   } // end if fUseReducHitPCAxis
 
   // Now fill up the recovered hits
-  /*
   for ( auto const& iHitPtr : hitsPossiblyRecovered ) {
     auto const& thisWireID = iHitPtr->WireID();
     float thisWireTick = iHitPtr->PeakTime();
     // If checking how many hits this method passed, do the check
-    if ( fTryAllMethods && hitToRecoveryMethodMap.find( std::make_pair(thisWireID,thisWireTick) )==hitToRecoveryMethodMap.end() ) continue;
-    if ( fTryAllMethods && hitToRecoveryMethodMap[ std::make_pair(thisWireID,thisWireTick) ].size()<fTryAllMethodsMinSuccess ) continue;
+    if ( fTryAllMethods &&
+         hitToRecoveryMethodMap.find( std::make_pair(thisWireID,thisWireTick) )==hitToRecoveryMethodMap.end() )
+      continue;
+    if ( fTryAllMethods &&
+         hitToRecoveryMethodMap[ std::make_pair(thisWireID,thisWireTick) ].size()<fTryAllMethodsMinSuccess )
+      continue;
     recob::Hit theHit = *iHitPtr;
     hitCol.emplace_back(std::move(theHit));
   }
-  */
 
   hitCol.put_into(e);
 }
