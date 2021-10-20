@@ -270,7 +270,7 @@ void GaussHitRecovery::produce(art::Event& e)
 	      linregNeighbors[ wID.asPlaneID() ].push_back( std::make_pair(slope,intercept) );
       } // loop hits
     } // loop hit labels
-  } // end !fUseReducHitClusters
+  } // end fUseFindNeighbors
 
   // if fUseReducHitClusters then use the hit assns to recob::Cluster
   else if ( fUseReducHitClusters ) {
@@ -373,18 +373,23 @@ void GaussHitRecovery::produce(art::Event& e)
   std::string printInfo = "Processing:\n ";
   for( geo::PlaneID const& thisPlaneID : fGeom->IteratePlaneIDs() ){
     printInfo += thisPlaneID.toString() + " linreg = ";
-    if ( linregNeighbors.find(thisPlaneID)==linregNeighbors.end() )
+    if ( linregNeighbors.find(thisPlaneID)==linregNeighbors.end() ) {
       printInfo += "0 ";
-    else
+      totLinRegN += linregNeighbors[thisPlaneID].size();
+    }
+    else {
       printInfo += std::to_string(linregNeighbors[thisPlaneID].size()) + " ";
-    if ( linregClusters.find(thisPlaneID)==linregClusters.end() )
+    }
+    if ( linregClusters.find(thisPlaneID)==linregClusters.end() ) {
       printInfo += "0";
-    else
+      totLinRegC += linregClusters[thisPlaneID].size();
+    }
+    else {
       printInfo += std::to_string(linregClusters[thisPlaneID].size());
+    }
     printInfo += "\n ";
-    totLinRegN += linregNeighbors[thisPlaneID].size();
-    totLinRegC += linregClusters[thisPlaneID].size();
   }
+  printInfo += "Totals: " + std::to_string(totLinRegN) + " " + std::to_string(totLinRegC) + "\n";
   mf::LogWarning("GaussHitRecovery") << printInfo;
 
   // All hits, save some as the recovered hits. The LinReg counts should only be >0 if that method is "enabled"
