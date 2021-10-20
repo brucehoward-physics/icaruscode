@@ -108,7 +108,7 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   fUseReducHitPCAxis      ( p.get<bool>("UseReducedHitPCAxis",false) ),
   fPCAxisOnlyBetween      ( p.get<bool>("PCAxisOnlyBetween",false) ),
   fPCAxisTolerance        ( p.get<float>("PCAxisTolerance",5.) ),
-  fMinMethodsSuccess      ( p.get<int>("MethodsMinSuccess",0) )
+  fMinMethodsSuccess      ( p.get<int>("MinMethodsSuccess",0) )
 {
   // Call appropriate consumes<>() for any products to be retrieved by this module.
   // NOTE ?? - is it not okay to do what I'm doing below to get the hits to decide amongst?
