@@ -87,7 +87,7 @@ private:
   bool fPCAxisOnlyBetween;       // If true, only recover hits between 2 groupings on a plane, not along the extension
   float fPCAxisTolerance;        // Defines the anglular tolerance (in degrees) in PCAxis method.
 
-  bool fMinMethodsSuccess; // how many methods does a hit need to pass to be saved 
+  int fMinMethodsSuccess;  // how many methods does a hit need to pass to be saved
                            // (default "0" - a hit still has to be registed to save though)
 };
 
@@ -111,7 +111,6 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   fMinMethodsSuccess      ( p.get<int>("MinMethodsSuccess",0) )
 {
   // Call appropriate consumes<>() for any products to be retrieved by this module.
-  // NOTE ?? - is it not okay to do what I'm doing below to get the hits to decide amongst?
 
   // Override fUseReducHitClusters if fUseReducHitPCAxis
   int usingNeighbors = fUseFindNeighbors    ? 1 : 0;
@@ -736,7 +735,7 @@ void GaussHitRecovery::produce(art::Event& e)
     if ( fMinMethodsSuccess>=1 && 
          hitToRecoveryMethodMap.find( std::make_pair(thisWireID,thisWireTick) )==hitToRecoveryMethodMap.end() )
       continue;
-    if ( hitToRecoveryMethodMap[ std::make_pair(thisWireID,thisWireTick) ].size()<fMinMethodsSuccess )
+    if ( fMinMethodsSuccess > (int)hitToRecoveryMethodMap[ std::make_pair(thisWireID,thisWireTick) ].size() )
       continue;
     recob::Hit theHit = *iHitPtr;
     hitCol.emplace_back(std::move(theHit));
