@@ -677,8 +677,8 @@ void GaussHitRecovery::produce(art::Event& e)
           auto thisPlaneID = iWire.asPlaneID();
 
 	        // Loop through the wire,tick point combinations and figure out 
-	        // TODO: the other methods reclaim hits along the line, should there be similar method
-          //        or something to recover outside of these here too?
+	        if ( allPcaClusterPoint.find( thisPlaneID ) == allPcaClusterPoint.end() ) continue;
+
 	        for ( unsigned int iPtPair = 0; iPtPair < allPcaClusterPoint[ thisPlaneID ].size(); ++iPtPair ) {
 	          bool firstIsLoWire = (allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first <
                                   allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.first) ? true : false;
@@ -693,6 +693,7 @@ void GaussHitRecovery::produce(art::Event& e)
 
             // if we only want to use hits between 2 groups
 	          if ( fPCAxisOnlyBetween && (thisWire < loWire || thisWire > hiWire) ) continue;
+            if ( (int)hiWire == (int)loWire ) continue;
 
 	          // make a simple line connecting these two:
 	          // m = (y2-y1) / (x2 - x1)
