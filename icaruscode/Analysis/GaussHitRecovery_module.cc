@@ -71,6 +71,7 @@ private:
   // Params
   std::vector<art::InputTag> fHitsLabelVec;
   std::vector<art::InputTag> fReducHitsLabelVec;
+  std::vector<art::InputTag> fWireLabelVec;
   std::string fHitCreatorInstanceName;
   int fNTicksSmooth;
   int fNWiresSmooth;
@@ -96,6 +97,7 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   : EDProducer{p},
   fHitsLabelVec           ( p.get< std::vector<art::InputTag> >("HitModuleLabels",        std::vector<art::InputTag>() = {"gausHit"}) ),
   fReducHitsLabelVec      ( p.get< std::vector<art::InputTag> >("ReducedHitModuleLabels", std::vector<art::InputTag>() = {"cluster3D"}) ),
+  fWireLabelVec           ( p.get< std::vector<art::InputTag> >("WireLabel",              std::vector<art::InputTag>() = {"roifinder"}) ),
   fHitCreatorInstanceName ( p.get<std::string>("HitCreatorInstanaceName","") ),
   fNTicksSmooth           ( p.get<int>("NTicksSmooth",60) ),
   fNWiresSmooth           ( p.get<int>("NWiresSmooth",12) ),
@@ -128,13 +130,19 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
       << "I think it's probably safe to say this module isn't configured to run multi-thread...";
   }
 
-  recob::HitCollectionCreator::declare_products(producesCollector(), fHitCreatorInstanceName, false, false);
+  recob::HitCollectionCreator::declare_products(producesCollector(), fHitCreatorInstanceName, true, false);
 }
 
 void GaussHitRecovery::produce(art::Event& e)
 {
-  // -- As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc) but with assns turned off
-  recob::HitCollectionCreator hitCol(e, fHitCreatorInstanceName, false, false);
+  // -- As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc)
+  recob::HitCollectionCreator hitCol(e, fHitCreatorInstanceName, true, false);
+
+  struct hitstruct {
+    recob::Hit stHit;
+    art::Ptr<recob::Wire> stWire;
+  };
+  //////////
 
   std::map< geo::WireID, std::vector< std::pair<float,float> > > wireToReducHitsTimeRMS;
 
@@ -148,11 +156,32 @@ void GaussHitRecovery::produce(art::Event& e)
       mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
       return;
     }
+
+    std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
+    wiresHandleVec.resize( fWireLabelVec.size() );
+    for ( unsigned int iLabel=0; iLabel<fWireLabelVec.size(); ++iLabel ) {
+      if ( !e.getByLabel(fWireLabelVec[iLabel],wiresHandleVec[iLabel]) ) {
+        mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[iLabel];
+        return;
+      }
+    }
+
+    art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
+    if( !fmwire.isValid() ){
+      // Check against validity of fmtrk (using isValid, as used in an analyzer module from SBND)
+      mf::LogError("GaussHitRecovery") << "Error in validity of fmwire. Returning.";
+      return;
+    }
     
     for ( auto const& iHitPtr : hits ) {
       // All reduced hits should be saved in the final hit set
       recob::Hit theHit = *iHitPtr;
-      hitCol.emplace_back(std::move(theHit));
+      // And get the associated wire
+      std::vector< art::Ptr<recob::Wire> > hitWires = fmwire.at(iHitPtr.key());
+      if ( hitWires.size() == 0 ) throw cet::exception("GaussHitRecovery") << "Hit found with no associated wires...\n";
+      else if ( hitWires.size() > 1 ) mf::LogWarning("GaussHitRecovery") << "Hit with >1 recob::Wire associated...";
+
+      hitCol.emplace_back(theHit,hitWires[0]);
       // Add the hit to this map for hopefully easier lookup later.
       wireToReducHitsTimeRMS[ iHitPtr->WireID() ].push_back( std::make_pair(iHitPtr->PeakTime(), iHitPtr->RMS()) );
     }
@@ -164,7 +193,7 @@ void GaussHitRecovery::produce(art::Event& e)
   // Part 1: map of pair <WireID, tick> to a vector of the recovery methods
   std::map< std::pair< geo::WireID, float >, std::vector<int> > hitToRecoveryMethodMap;
   // Part 2: any hits recovered (will also be registered in map)
-  std::vector< art::Ptr<recob::Hit> >                           hitsPossiblyRecovered;
+  std::vector< hitstruct >                           hitsPossiblyRecovered;
 
   // -- Method explored in the HitRecoveryAnalysis module
   // Geometry
@@ -404,6 +433,26 @@ void GaussHitRecovery::produce(art::Event& e)
 	      return;
       }
 
+      //art::Handle< std::vector<recob::Wire> > wiresHandle;
+      //if ( !e.getByLabel(fWireLabel,wiresHandle) ) {
+	    //  mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabel;
+      //	return;
+      //}
+      std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
+      wiresHandleVec.resize( fWireLabelVec.size() );
+      for ( unsigned int iLabel=0; iLabel<fWireLabelVec.size(); ++iLabel ) {
+        if ( !e.getByLabel(fWireLabelVec[iLabel],wiresHandleVec[iLabel]) ) {
+          mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[iLabel];
+          return;
+        }
+      }
+
+      art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
+      if( !fmwire.isValid() ){
+      	mf::LogError("GaussHitRecovery") << "Error in validity of fmwire. Returning.";
+      	return;
+      }
+
       for ( auto const& iHitPtr : hits ) {
       	auto const& thisTime = iHitPtr->PeakTime();
       	auto const& thisRMS = iHitPtr->RMS();
@@ -438,7 +487,13 @@ void GaussHitRecovery::produce(art::Event& e)
         	    if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
 	              // Put the hit into the recovered hit vector if it's not already registered
                 if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
-                  hitsPossiblyRecovered.push_back( iHitPtr );
+                  std::vector< art::Ptr<recob::Wire> > hitWires = fmwire.at( iHitPtr.key() );
+                  if ( hitWires.size() == 0 ) throw cet::exception("GaussHitRecovery") << "Hit found with no associated wires...\n";
+                  else if ( hitWires.size() > 1 ) mf::LogWarning("GaussHitRecovery") << "Hit with >1 recob::Wire associated...";
+
+                  hitstruct tmp{*iHitPtr,hitWires[0]};
+
+                  hitsPossiblyRecovered.push_back( std::move(tmp) );
                   hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(1);
                 }
                 else {
@@ -462,7 +517,14 @@ void GaussHitRecovery::produce(art::Event& e)
         	    if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
                 // Put the hit into the recovered hit vector if it's not already registered
                 if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
-                  hitsPossiblyRecovered.push_back( iHitPtr );
+                  recob::Hit theHit = *iHitPtr;
+                  std::vector< art::Ptr<recob::Wire> > hitWires = fmwire.at( iHitPtr.key() );
+                  if ( hitWires.size() == 0 ) throw cet::exception("GaussHitRecovery") << "Hit found with no associated wires...\n";
+                  else if ( hitWires.size() > 1 ) mf::LogWarning("GaussHitRecovery") << "Hit with >1 recob::Wire associated...";
+
+                  hitstruct tmp{theHit,hitWires[0]};
+
+                  hitsPossiblyRecovered.push_back( std::move(tmp) );
                   hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(0);
                 }
                 else {
@@ -650,6 +712,21 @@ void GaussHitRecovery::produce(art::Event& e)
         return;
       }
 
+      std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
+      wiresHandleVec.resize( fWireLabelVec.size() );
+      for ( unsigned int iLabel=0; iLabel<fWireLabelVec.size(); ++iLabel ) {
+        if ( !e.getByLabel(fWireLabelVec[iLabel],wiresHandleVec[iLabel]) ) {
+          mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[iLabel];
+          return;
+        }
+      }
+
+      art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
+      if( !fmwire.isValid() ){
+      	mf::LogError("GaussHitRecovery") << "Error in validity of fmwire. Returning.";
+      	return;
+      }
+
       for ( auto const& iHitPtr : hits ) {
         auto const& thisTime = iHitPtr->PeakTime();
         auto const& thisRMS = iHitPtr->RMS();
@@ -706,7 +783,13 @@ void GaussHitRecovery::produce(art::Event& e)
 
             // Put the hit into the recovered hit vector if it's not already registered
             if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
-              hitsPossiblyRecovered.push_back( iHitPtr );
+              std::vector< art::Ptr<recob::Wire> > hitWires = fmwire.at( iHitPtr.key() );
+              if ( hitWires.size() == 0 ) throw cet::exception("GaussHitRecovery") << "Hit found with no associated wires...\n";
+              else if ( hitWires.size() > 1 ) mf::LogWarning("GaussHitRecovery") << "Hit with >1 recob::Wire associated...";
+
+              hitstruct tmp{*iHitPtr,hitWires[0]};
+
+              hitsPossiblyRecovered.push_back( std::move(tmp) );
               hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(2);
             }
             else {
@@ -728,9 +811,9 @@ void GaussHitRecovery::produce(art::Event& e)
   } // end if fUseReducHitPCAxis
 
   // Now fill up the recovered hits
-  for ( auto const& iHitPtr : hitsPossiblyRecovered ) {
-    auto const& thisWireID = iHitPtr->WireID();
-    float thisWireTick = iHitPtr->PeakTime();
+  for ( auto const& iHitStruct : hitsPossiblyRecovered ) {
+    auto const& thisWireID = iHitStruct.stHit.WireID();
+    float thisWireTick = iHitStruct.stHit.PeakTime();
     // Require at least fMinMethodsSuccess methods to have found the hit for it to be recovered. Allows to use
     // a combination of algorithms
     if ( fMinMethodsSuccess>=1 && 
@@ -738,8 +821,7 @@ void GaussHitRecovery::produce(art::Event& e)
       continue;
     if ( fMinMethodsSuccess > (int)hitToRecoveryMethodMap[ std::make_pair(thisWireID,thisWireTick) ].size() )
       continue;
-    recob::Hit theHit = *iHitPtr;
-    hitCol.emplace_back(std::move(theHit));
+    hitCol.emplace_back(iHitStruct.stHit,iHitStruct.stWire);
   }
 
   hitCol.put_into(e);
