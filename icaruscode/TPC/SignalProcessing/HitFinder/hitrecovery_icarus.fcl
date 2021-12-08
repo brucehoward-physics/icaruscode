@@ -1,0 +1,33 @@
+BEGIN_PROLOG
+
+hitRecoveryE:
+{
+  module_type: "GaussHitRecovery"
+  HitModuleLabels: ["gaushitTPCEE","gaushitTPCEW"]
+  ReducedHitModuleLabels: ["cluster3DCryoE"]
+  WireLabel: ["roifinder:PHYSCRATEDATATPCEE","roifinder:PHYSCRATEDATATPCEW"]
+  SkipRecoveryPlane: 0
+  MinMethodsSuccess: 1
+  UseFindNeighbors: false
+  UseReducedHitClusters: true
+  UseReducedHitPCAxis: false
+  PCAxisTolerance: 10.
+  PCAxisOnlyBetween: false
+}
+
+hitRecoveryW:
+{
+  module_type: "GaussHitRecovery"
+  HitModuleLabels: ["gaushitTPCWE","gaushitTPCWW"]
+  ReducedHitModuleLabels: ["cluster3DCryoW"]
+  WireLabel: ["roifinder:PHYSCRATEDATATPCWE","roifinder:PHYSCRATEDATATPCWW"]
+  SkipRecoveryPlane: 0
+  MinMethodsSuccess: 1
+  UseFindNeighbors: false
+  UseReducedHitClusters: true
+  UseReducedHitPCAxis: false
+  PCAxisTolerance: 10.
+  PCAxisOnlyBetween: false
+}
+
+END_PROLOG
