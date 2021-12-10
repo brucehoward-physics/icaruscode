@@ -170,14 +170,14 @@ void GaussHitRecovery::produce(art::Event& e)
       return;
     }
 
-    std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
-    wiresHandleVec.resize( fWireLabelVec.size() );
-    for ( unsigned int iLabel=0; iLabel<fWireLabelVec.size(); ++iLabel ) {
-      if ( !e.getByLabel(fWireLabelVec[iLabel],wiresHandleVec[iLabel]) ) {
-        mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[iLabel];
-        return;
-      }
-    }
+    // std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
+    // wiresHandleVec.resize( fWireLabelVec.size() );
+    // for ( unsigned int jLabel=0; jLabel<fWireLabelVec.size(); ++jLabel ) {
+    //   if ( !e.getByLabel(fWireLabelVec[jLabel],wiresHandleVec[jLabel]) ) {
+    //     mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[jLabel];
+    //     return;
+    //   }
+    // }
 
     art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
     if( !fmwire.isValid() ){
@@ -444,19 +444,19 @@ void GaussHitRecovery::produce(art::Event& e)
         return;
       }
 
-      //art::Handle< std::vector<recob::Wire> > wiresHandle;
-      //if ( !e.getByLabel(fWireLabel,wiresHandle) ) {
-      //  mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabel;
-      //	return;
-      //}
-      std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
-      wiresHandleVec.resize( fWireLabelVec.size() );
-      for ( unsigned int iLabel=0; iLabel<fWireLabelVec.size(); ++iLabel ) {
-        if ( !e.getByLabel(fWireLabelVec[iLabel],wiresHandleVec[iLabel]) ) {
-          mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[iLabel];
-          return;
-        }
-      }
+      // //art::Handle< std::vector<recob::Wire> > wiresHandle;
+      // //if ( !e.getByLabel(fWireLabel,wiresHandle) ) {
+      // //  mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabel;
+      // //	return;
+      // //}
+      // std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
+      // wiresHandleVec.resize( fWireLabelVec.size() );
+      // for ( unsigned int jLabel=0; jLabel<fWireLabelVec.size(); ++jLabel ) {
+      //   if ( !e.getByLabel(fWireLabelVec[jLabel],wiresHandleVec[jLabel]) ) {
+      //     mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[jLabel];
+      //     return;
+      //   }
+      // }
 
       art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
       if( !fmwire.isValid() ){
@@ -728,14 +728,14 @@ void GaussHitRecovery::produce(art::Event& e)
         return;
       }
 
-      std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
-      wiresHandleVec.resize( fWireLabelVec.size() );
-      for ( unsigned int iLabel=0; iLabel<fWireLabelVec.size(); ++iLabel ) {
-        if ( !e.getByLabel(fWireLabelVec[iLabel],wiresHandleVec[iLabel]) ) {
-          mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[iLabel];
-          return;
-        }
-      }
+      // std::vector< art::Handle< std::vector<recob::Wire> > > wiresHandleVec;
+      // wiresHandleVec.resize( fWireLabelVec.size() );
+      // for ( unsigned int jLabel=0; jLabel<fWireLabelVec.size(); ++jLabel ) {
+      //   if ( !e.getByLabel(fWireLabelVec[jLabel],wiresHandleVec[jLabel]) ) {
+      //     mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Wire with label " << fWireLabelVec[jLabel];
+      //     return;
+      //   }
+      // }
 
       art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
       if( !fmwire.isValid() ){
