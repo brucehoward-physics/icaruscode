@@ -24,6 +24,7 @@
 #include "larcore/Geometry/Geometry.h"
 #include "art_root_io/TFileService.h"
 #include "lardataobj/RecoBase/Hit.h"
+#include "lardataobj/RecoBase/SpacePoint.h"
 #include "lardataobj/RecoBase/Cluster.h"
 #include "lardataobj/RecoBase/PFParticle.h"
 #include "lardataobj/RecoBase/PCAxis.h"
@@ -633,7 +634,7 @@ void GaussHitRecovery::produce(art::Event& e)
       std::vector<TVector3> pcaVectors;
       std::vector<float> pcaMagnitudes;
       std::vector< std::map< geo::PlaneID, std::pair<float,float> > > pcaClusterPoint; // a point relating to cluster
-      std::vector<recob::SpacePoint> pcaSpacePoint; // pick out the spacepoint relating to this point for comparison
+      std::vector< art::Ptr<recob::SpacePoint> > pcaSpacePoint; // pick out the spacepoint relating to this point for comparison
 
       // Loop through PFParticles
       // Get the pairs of PCA axes pointing toward each other
@@ -679,8 +680,10 @@ void GaussHitRecovery::produce(art::Event& e)
         // if no clusters have hits, skip this pfp/pca...
         if ( useClstIdx==clst.size() ) continue;
         // get the spacepoint for the 0th hit:
-        std::vector<recob::SpacePoint> useSps = fmsps( (fmhit.at( clst[useClstIdx].key() ).at(0)).key() );
-        std::cout << "useSps.size() = " << useSps.size() << std::endl;
+	std::vector< art::Ptr<recob::SpacePoint> > useSps = fmsps.at ( (fmhit.at( clst[useClstIdx].key() ).at(0)).key() );
+	// TODO: From a sample event after the updates, I'm not sure this is doing anything, perhaps becuase there can be >1 
+	//       spacepoint for a hit and I'm just picking one. Need to think about this and examine this method more.
+        //std::cout << "useSps.size() = " << useSps.size() << std::endl;
         if ( useSps.size()==0 ) continue;
         pcaSpacePoint.push_back( useSps[0] );
 
@@ -706,8 +709,8 @@ void GaussHitRecovery::produce(art::Event& e)
           if( vAngle > fPCAxisTolerance ) continue; // doesn't pass "pointing"/"angular" tolerance
 
           // And check if the line connecting spacepoints matches up with the PCAxes
-          auto const& pointI = pcaSpacePoint[i];
-          auto const& pointJ = pcaSpacePoint[j];
+          auto const& pointI = pcaSpacePoint[i]->position();
+          auto const& pointJ = pcaSpacePoint[j]->position();
           TVector3 rPoints( pointJ.X()-pointI.X(), pointJ.Y()-pointI.Y(), pointJ.Z()-pointI.Z() );
           double rAngle = ( 180./TMath::Pi() )*pca1.Angle( rPoints );
           rAngle = std::min( rAngle, 180.-rAngle );
