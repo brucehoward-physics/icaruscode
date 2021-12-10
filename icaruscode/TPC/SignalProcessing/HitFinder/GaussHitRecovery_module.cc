@@ -586,6 +586,12 @@ void GaussHitRecovery::produce(art::Event& e)
         return;
       }
 
+      art::FindManyP<recob::SpacePoint> fmsps(hitsHandle, e, iLabel);
+      if( !fmsps.isValid() ){
+        mf::LogError("GaussHitRecovery") << "Error in validity of fmsps. Returning.";
+        return;
+      }
+
       art::Handle< std::vector<recob::PFParticle> > pfpsHandle;
       std::vector< art::Ptr<recob::PFParticle> > pfps;
       if ( e.getByLabel(iLabel,pfpsHandle) ) {
@@ -627,6 +633,7 @@ void GaussHitRecovery::produce(art::Event& e)
       std::vector<TVector3> pcaVectors;
       std::vector<float> pcaMagnitudes;
       std::vector< std::map< geo::PlaneID, std::pair<float,float> > > pcaClusterPoint; // a point relating to cluster
+      std::vector<recob::SpacePoint> pcaSpacePoint; // pick out the spacepoint relating to this point for comparison
 
       // Loop through PFParticles
       // Get the pairs of PCA axes pointing toward each other
@@ -656,14 +663,26 @@ void GaussHitRecovery::produce(art::Event& e)
         if ( (ax1val[2] <= 10.*ax1val[1]) || (ax1val[2] <= 10.*ax1val[0]) ) continue;
 
         // Get a point in the PCAxis related cluster, map it plane by plane
+        unsigned int useClstIdx=0;
         for ( auto const& iClst : clst ) {
           std::vector< art::Ptr<recob::Hit> > clstHits = fmhit.at( iClst.key() );
-          if ( clstHits.size() == 0 ) continue;
+          if ( clstHits.size() == 0 ) {
+            useClstIdx+=1;
+            continue;
+          }
           // consider just hit[0]
           if ( fSkipRecoveryPlane == (int)clstHits[0]->WireID().Plane ) continue;
           std::pair hitPoint = std::make_pair( clstHits[0]->WireID().Wire, clstHits[0]->PeakTime() );
           thisPcaClusterPoint[ clstHits[0]->WireID().asPlaneID() ] = hitPoint;
         }
+
+        // if no clusters have hits, skip this pfp/pca...
+        if ( useClstIdx==clst.size() ) continue;
+        // get the spacepoint for the 0th hit:
+        std::vector<recob::SpacePoint> useSps = fmsps( (fmhit.at( clst[useClstIdx].key() ).at(0)).key() );
+        std::cout << "useSps.size() = " << useSps.size() << std::endl;
+        if ( useSps.size()==0 ) continue;
+        pcaSpacePoint.push_back( useSps[0] );
 
         pcaClusterPoint.push_back(thisPcaClusterPoint);
 
@@ -685,6 +704,14 @@ void GaussHitRecovery::produce(art::Event& e)
           double vAngle = ( 180./TMath::Pi() )*pca1.Angle( pca2 );
           vAngle = std::min( vAngle, 180.-vAngle );
           if( vAngle > fPCAxisTolerance ) continue; // doesn't pass "pointing"/"angular" tolerance
+
+          // And check if the line connecting spacepoints matches up with the PCAxes
+          auto const& pointI = pcaSpacePoint[i];
+          auto const& pointJ = pcaSpacePoint[j];
+          TVector3 rPoints( pointJ.X()-pointI.X(), pointJ.Y()-pointI.Y(), pointJ.Z()-pointI.Z() );
+          double rAngle = ( 180./TMath::Pi() )*pca1.Angle( rPoints );
+          rAngle = std::min( rAngle, 180.-rAngle );
+          if( rAngle > fPCAxisTolerance ) continue; // PCAxis doesn't align with vector connecting points in cluster...
 
           for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
             if ( pcaClusterPoint.at(i).find(iPlaneID)==pcaClusterPoint.at(i).end() ||
