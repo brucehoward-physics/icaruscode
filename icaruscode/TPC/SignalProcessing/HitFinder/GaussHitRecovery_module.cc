@@ -634,7 +634,7 @@ void GaussHitRecovery::produce(art::Event& e)
       std::vector<TVector3> pcaVectors;
       std::vector<float> pcaMagnitudes;
       std::vector< std::map< geo::PlaneID, std::pair<float,float> > > pcaClusterPoint; // a point relating to cluster
-      std::vector< art::Ptr<recob::SpacePoint> > pcaSpacePoint; // pick out the spacepoint relating to this point for comparison
+      std::vector< std::vector< art::Ptr<recob::SpacePoint> > > pcaSpacePoint; // pick out the spacepoints relating to this point for comparison
 
       // Loop through PFParticles
       // Get the pairs of PCA axes pointing toward each other
@@ -680,12 +680,11 @@ void GaussHitRecovery::produce(art::Event& e)
         // if no clusters have hits, skip this pfp/pca...
         if ( useClstIdx==clst.size() ) continue;
         // get the spacepoint for the 0th hit:
-	std::vector< art::Ptr<recob::SpacePoint> > useSps = fmsps.at ( (fmhit.at( clst[useClstIdx].key() ).at(0)).key() );
-	// TODO: From a sample event after the updates, I'm not sure this is doing anything, perhaps becuase there can be >1 
-	//       spacepoint for a hit and I'm just picking one. Need to think about this and examine this method more.
+        std::vector< art::Ptr<recob::SpacePoint> > useSps = fmsps.at ( (fmhit.at( clst[useClstIdx].key() ).at(0)).key() );
+        // TODO: For now return all the spacepoints and see if any align when comparing potential "matches"
         //std::cout << "useSps.size() = " << useSps.size() << std::endl;
         if ( useSps.size()==0 ) continue;
-        pcaSpacePoint.push_back( useSps[0] );
+        pcaSpacePoint.push_back( useSps );
 
         pcaClusterPoint.push_back(thisPcaClusterPoint);
 
@@ -708,13 +707,23 @@ void GaussHitRecovery::produce(art::Event& e)
           vAngle = std::min( vAngle, 180.-vAngle );
           if( vAngle > fPCAxisTolerance ) continue; // doesn't pass "pointing"/"angular" tolerance
 
-          // And check if the line connecting spacepoints matches up with the PCAxes
-          auto const& pointI = pcaSpacePoint[i]->position();
-          auto const& pointJ = pcaSpacePoint[j]->position();
-          TVector3 rPoints( pointJ.X()-pointI.X(), pointJ.Y()-pointI.Y(), pointJ.Z()-pointI.Z() );
-          double rAngle = ( 180./TMath::Pi() )*pca1.Angle( rPoints );
-          rAngle = std::min( rAngle, 180.-rAngle );
-          if( rAngle > fPCAxisTolerance ) continue; // PCAxis doesn't align with vector connecting points in cluster...
+          // And check if the line connecting spacepoints (any combination...) matches up with the PCAxes
+          bool matchingSps = false;
+          for ( auto const& spi : pcaSpacePoint[i] ) {
+            for ( auto const& spj : pcaSpacePoint[j] ) {
+              auto const& pointI = spi->position();
+              auto const& pointJ = spj->position();
+              TVector3 rPoints( pointJ.X()-pointI.X(), pointJ.Y()-pointI.Y(), pointJ.Z()-pointI.Z() );
+              double rAngle = ( 180./TMath::Pi() )*pca1.Angle( rPoints );
+              rAngle = std::min( rAngle, 180.-rAngle );
+              if( rAngle < fPCAxisTolerance ) {
+                matchingSps = true;
+                break;
+              }
+            }
+            if ( matchingSps ) break;
+          }
+          if ( !matchingSps ) continue;
 
           for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
             if ( pcaClusterPoint.at(i).find(iPlaneID)==pcaClusterPoint.at(i).end() ||
