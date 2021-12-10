@@ -73,23 +73,23 @@ private:
   std::vector<art::InputTag> fReducHitsLabelVec;
   std::vector<art::InputTag> fWireLabelVec;
   std::string fHitCreatorInstanceName;
-  int fNTicksSmooth;
-  int fNWiresSmooth;
-  int fReqNeighbors;
-  float fMaxChi2NDF;
-  float fLinregTolerance;
-  int fSkipRecoveryPlane;
+  int fNTicksSmooth;         // in neighbors method, range of ticks to look around
+  int fNWiresSmooth;         // in neighbors method, range of wires to look around
+  int fReqNeighbors;         // in neighbors method, number of neighbors required of "pseudo-cluster"
 
-  bool fUseFindNeighbors;           // Default method. Look for interesting points in the hit map.
+  float fMaxChi2NDF;         // max chi2 per ndf at/above which do not save the given linear regression
+  float fLinregTolerance;    // allowed tolerance (in number of RMSs) for a hit from considered line (all 3 methods) to recover
+  int fSkipRecoveryPlane;    // set this value to a number (typically 0, 1, 2) to skip trying to recover hits from that plane
 
-  bool fUseReducHitClusters;     // Instead of looking for the interesting points in the hit map, take an input set of clusters.
+  bool fUseFindNeighbors;    // Default method. Look for interesting points in the reduced hit set.
+  bool fUseReducHitClusters; // Instead of looking for the interesting points in the hit map, take an input set of clusters.
+  bool fUseReducHitPCAxis;   // Third option - use input set of PCAxis objects.
+  bool fPCAxisOnlyBetween;   // PCAxis option -- If true, only recover hits between 2 groupings on a plane, not along the extension
+  float fPCAxisTolerance;    // PCAxis option -- Defines the anglular tolerance (in degrees) in PCAxis method.
 
-  bool fUseReducHitPCAxis;       // If true, this overrides the fUseReducHitClusters setting...
-  bool fPCAxisOnlyBetween;       // If true, only recover hits between 2 groupings on a plane, not along the extension
-  float fPCAxisTolerance;        // Defines the anglular tolerance (in degrees) in PCAxis method.
-
-  int fMinMethodsSuccess;  // how many methods does a hit need to pass to be saved
-                           // (default "0" - a hit still has to be registed to save though)
+  int fMinMethodsSuccess;    // how many methods does a hit need to pass to be saved
+                             // This plus true/false for the three methods allows you to AND or OR the methods essentially
+                             // (default "0" - a hit still has to be registed to save though)
 };
 
 
@@ -114,39 +114,52 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
 {
   // Call appropriate consumes<>() for any products to be retrieved by this module.
 
-  // Override fUseReducHitClusters if fUseReducHitPCAxis
-  int usingNeighbors = fUseFindNeighbors    ? 1 : 0;
-  int usingClusters  = fUseReducHitClusters ? 1 : 0;
-  int usingPCAxis    = fUseReducHitPCAxis   ? 1 : 0;
-  int numMethods = usingNeighbors + usingClusters + usingPCAxis;
+  const int usingNeighbors = fUseFindNeighbors    ? 1 : 0;
+  const int usingClusters  = fUseReducHitClusters ? 1 : 0;
+  const int usingPCAxis    = fUseReducHitPCAxis   ? 1 : 0;
+  const int numMethods = usingNeighbors + usingClusters + usingPCAxis;
   if ( numMethods==0 )
     throw cet::exception("GaussHitRecovery") << "Trying to run HitRecovery with no methods activated... !\n";
   if ( numMethods < fMinMethodsSuccess )
     throw cet::exception("GaussHitRecovery") << "Too few methods run compared to ask for MinMethodsSuccess... !\n";
 
-  // Following exception and declaration come from the GausHitFinder, with some alterations as needed.
+  // TODO: is this the right thing to ask here? I think I'm assuming this isn't thread-safe but maybe we want it to be?
+  // The GausHitFinder had a check related to thread-safety that I'm basing this structure on
   if (art::Globals::instance()->nthreads() > 1u) {
     throw art::Exception(art::errors::Configuration)
       << "I think it's probably safe to say this module isn't configured to run multi-thread...";
   }
 
+  // basically from the GausHitFinder
   recob::HitCollectionCreator::declare_products(producesCollector(), fHitCreatorInstanceName, true, false);
 }
 
 void GaussHitRecovery::produce(art::Event& e)
 {
-  // -- As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc)
+  // As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc)
   recob::HitCollectionCreator hitCol(e, fHitCreatorInstanceName, true, false);
-
+  // Also as in GausHitFinder
   struct hitstruct {
     recob::Hit stHit;
     art::Ptr<recob::Wire> stWire;
   };
-  //////////
+
+  // Geometry
+  fGeom = lar::providerFrom<geo::Geometry>();
+
+  /////////////////////////////////////////////////////////////////////
+  //
+  // STEP 1: Deal with the reduced set of hits we want to build upon
+  //
+  /////////////////////////////////////////////////////////////////////
 
   std::map< geo::WireID, std::vector< std::pair<float,float> > > wireToReducHitsTimeRMS;
 
   for ( auto const& iLabel : fReducHitsLabelVec ) {
+    // Get the various handles and fill vectors, FindMany, etc. - some checks on things. In some cases
+    // these come from checks seen elsewhere (e.g. SBND analyzer module), but a note is that right now
+    // the behavior is to print a warning and return in the case where a check fails. Should be considered
+    // if throwing an exception would be better?
     art::Handle< std::vector<recob::Hit> > hitsHandle;
     std::vector< art::Ptr<recob::Hit> > hits;
     if ( e.getByLabel(iLabel,hitsHandle) ) {
@@ -168,7 +181,6 @@ void GaussHitRecovery::produce(art::Event& e)
 
     art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
     if( !fmwire.isValid() ){
-      // Check against validity of fmtrk (using isValid, as used in an analyzer module from SBND)
       mf::LogError("GaussHitRecovery") << "Error in validity of fmwire. Returning.";
       return;
     }
@@ -187,32 +199,32 @@ void GaussHitRecovery::produce(art::Event& e)
     }
   }
 
-  // Make a map of std::pair< WireID, Tick > with the second being a string of the methods so that one can then choose 
-  // multipe recovery methods at once
+  /////////////////////////////////////////////////////////////////////
+  //
+  // STEP 2: Now get the properties from these reduced hits and go
+  //         searching for hits to reclaim from the set of all hits
+  //
+  /////////////////////////////////////////////////////////////////////
+
   // TODO: is the RMS info needed along with the tick to guarantee we get a unique hit, i.e. not just wireid and tick?
-  // Part 1: map of pair <WireID, tick> to a vector of the recovery methods
+  // Map of pair <WireID, tick> to a vector of the recovery methods (each one being a separate int put into the vector)
   std::map< std::pair< geo::WireID, float >, std::vector<int> > hitToRecoveryMethodMap;
-  // Part 2: any hits recovered (will also be registered in map)
+  // Any hits recovered (will also be registered in map)
   std::vector< hitstruct >                                      hitsPossiblyRecovered;
 
-  // -- Method explored in the HitRecoveryAnalysis module
-  // Geometry
-  fGeom = lar::providerFrom<geo::Geometry>();
+  // TODO: I *think* the way this is being handled we shouldn't duplicate hits (e.g. if it is near the split region
+  //       and has two associated wires), however I guess a "decision" on which of the locations the hit should be
+  //       isn't made. Not sure if that has implications...
 
-  ////////////////////////////////////
-  // RECOVERY ALG TYPE 1
-  ////////////////////////////////////
-  // NOTE: if fUseReducHitPCAxis then don't need to get any linear regression results, we can skip all of this section and go to type 2
-
-  // Recover hits - first look at the reduced hits for linear patterns then find hits from the whole set that match this.
+  // 1. Linear regression methods (a sort of "neighbors" method and input cluster set)
   // For all hits: use the hit->Channel->WireIDVector to get the possible matches
   // For reduced hits: since a choice of the hit location has already been made in the 3d match, here we just use the hit->WireID
-
-  // NOTE: I think using this vector means that hits are only counted once even if both wire possibilities in overlap are met?
+  // TODO: is that right?
 
   std::map< geo::PlaneID, std::vector< std::pair<double,double> > > linregNeighbors;
   std::map< geo::PlaneID, std::vector< std::pair<double,double> > > linregClusters;
 
+  // Get a list of linear regressions from the neighbors method if fUseFindNeighbors
   if ( fUseFindNeighbors ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       art::Handle< std::vector<recob::Hit> > hitsHandle;
@@ -240,7 +252,7 @@ void GaussHitRecovery::produce(art::Event& e)
         if ( fSkipRecoveryPlane == (int)thisPlane ) continue;
   
         // Figure out how many neighbors this hit has, and if it has enough, see if they are a fairly linear grouping
-        int nNeighbors = -1; // start at -1 since we will count ourselves later
+        int nNeighbors = -1; // start at -1 since we will count ourself later
         for ( auto const& jHitPtr : hits ) {
           auto const& jTime = jHitPtr->PeakTime();
           auto const& jRMS = jHitPtr->RMS();
@@ -328,7 +340,6 @@ void GaussHitRecovery::produce(art::Event& e)
       // Find many for the clusters, hits
       art::FindManyP<recob::Hit> fmhit(clusterHandle, e, iLabel);
       if( !fmhit.isValid() ){
-        // Check against validity of fmtrk (using isValid, as used in an analyzer module from SBND)
         mf::LogError("GaussHitRecovery") << "Error in validity of fmhit. Returning.";
         return;
       }
@@ -418,7 +429,7 @@ void GaussHitRecovery::produce(art::Event& e)
     printInfo += "\n ";
   }
   printInfo += "Totals: " + std::to_string(totLinRegN) + " " + std::to_string(totLinRegC) + "\n";
-  mf::LogWarning("GaussHitRecovery") << printInfo;
+  mf::LogInfo("GaussHitRecovery") << printInfo;
 
   // All hits, save some as the recovered hits. The LinReg counts should only be >0 if that method is "enabled"
   if ( totLinRegN > 0 || totLinRegC > 0 ){
@@ -453,6 +464,7 @@ void GaussHitRecovery::produce(art::Event& e)
         return;
       }
 
+      // Loop through the set of all hits
       for ( auto const& iHitPtr : hits ) {
         auto const& thisTime = iHitPtr->PeakTime();
         auto const& thisRMS = iHitPtr->RMS();
@@ -467,6 +479,7 @@ void GaussHitRecovery::produce(art::Event& e)
           if ( fSkipRecoveryPlane == (int)iWire.Plane ) isSkippedPlane = true;
           if ( isReduc || isSkippedPlane ) break;
           if ( wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end() ) continue;
+          // TODO: is looping through like this and checking == on Tick and RMS the best way?
           for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
             if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
               isReduc = true;
@@ -483,7 +496,7 @@ void GaussHitRecovery::produce(art::Event& e)
           // First the Clusters LinReg if any:
           if( linregClusters.find(iWire.asPlaneID()) != linregClusters.end() ) {
             for ( auto const& iLine : linregClusters[iWire.asPlaneID()] ) {
-               double expect = iLine.first*thisWire + iLine.second;
+              double expect = iLine.first*thisWire + iLine.second;
               if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
                 // Put the hit into the recovered hit vector if it's not already registered
                 if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
@@ -497,6 +510,7 @@ void GaussHitRecovery::produce(art::Event& e)
                   hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(1);
                 }
                 else {
+                  // in case we already found this hit with this method
                   bool alreadyThisMethod = false;
                   for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ] ) {
                     if ( recoveryMethod==1 ) {
@@ -510,10 +524,11 @@ void GaussHitRecovery::produce(art::Event& e)
               }
             } // loop linear regressions (clusters) for this plane
           }
+
           // Second the Neighbors LinReg if any:
           if ( linregNeighbors.find(iWire.asPlaneID()) != linregNeighbors.end() ) {
             for ( auto const& iLine : linregNeighbors[iWire.asPlaneID()] ) {
-               double expect = iLine.first*thisWire + iLine.second;
+              double expect = iLine.first*thisWire + iLine.second;
               if( thisTime+fLinregTolerance*thisRMS > expect && thisTime-fLinregTolerance*thisRMS < expect ){
                 // Put the hit into the recovered hit vector if it's not already registered
                 if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
@@ -528,6 +543,7 @@ void GaussHitRecovery::produce(art::Event& e)
                   hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(0);
                 }
                 else {
+                  // in case we already found this hit with this method
                   bool alreadyThisMethod = false;
                   for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ] ) {
                     if ( recoveryMethod==0 ) {
@@ -544,23 +560,20 @@ void GaussHitRecovery::produce(art::Event& e)
         } // loop wires matching to the channel in the hit
       } // loop hits
     } // loop hit labels
-  } // only if totLinReg > 0, i.e. skip if using fUseReducHitPCAxis
+  } // only if total Linear Regressions saved is > 0
 
-  ////////////////////////////////////
-  // RECOVERY ALG TYPE 2
-  ////////////////////////////////////
 
-  // If fUseReducHit we will only use byproducts of Reduced hits, so simply get the Reduced Hits and
-  // copy them to hit col, and then move on to comparing the full hit set to the PCAAxes.
-  //
-  // Idea is to look for hits in the full set that are between two clusters pointing at each other...
+  // 2. Method using input PCAxis objects
+  // Idea is to look for hits in the full set that are (between?) two clusters "pointing at" each other...
+  // TODO: this method could probably be improved. Do we want to be using TVector3 or something else?
 
   std::map< geo::PlaneID, std::vector< std::pair<TVector3,TVector3> > >             allPcaVectors;
   std::map< geo::PlaneID, std::vector< std::pair<float,float> > >                   allPcaMagnitudes;
-  // A pair of pair of doubles -> wire,tick for pca1 (.first.{first,second}) & wire, tick for pca2 (.second.{first,second})
+  // A pair of pair of floats -> wire,tick for pca1 (.first.{first,second}) & wire, tick for pca2 (.second.{first,second})
   // Then there are a vector of these per plane for the event.
   std::map< geo::PlaneID, std::vector< std::pair< std::pair<float,float>, std::pair<float,float> > > >    allPcaClusterPoint;
 
+  // If fUseReducHitPCAxis, loop through the reduced hits and save some linear approx before checking all hits for matches
   if ( fUseReducHitPCAxis ) {
     for ( auto const& iLabel : fReducHitsLabelVec ) {
       art::Handle< std::vector<recob::Hit> > hitsHandle;
@@ -573,8 +586,6 @@ void GaussHitRecovery::produce(art::Event& e)
         return;
       }
 
-      // Loop through PFParticles
-      // Get the pairs of PCA axes pointing toward each other
       art::Handle< std::vector<recob::PFParticle> > pfpsHandle;
       std::vector< art::Ptr<recob::PFParticle> > pfps;
       if ( e.getByLabel(iLabel,pfpsHandle) ) {
@@ -587,7 +598,6 @@ void GaussHitRecovery::produce(art::Event& e)
 
       art::FindManyP<recob::PCAxis> fmpca(pfpsHandle, e, iLabel);
       if( !fmpca.isValid() ){
-        // Check against validity of fmpca (using isValid, as used in an analyzer module from SBND)
         mf::LogError("GaussHitRecovery") << "Error in validity of fmpca. Returning.";
         return;
       }
@@ -618,6 +628,8 @@ void GaussHitRecovery::produce(art::Event& e)
       std::vector<float> pcaMagnitudes;
       std::vector< std::map< geo::PlaneID, std::pair<float,float> > > pcaClusterPoint; // a point relating to cluster
 
+      // Loop through PFParticles
+      // Get the pairs of PCA axes pointing toward each other
       for ( auto const& iPFP : pfps ) {
         std::map< geo::PlaneID, std::pair<float,float> > thisPcaClusterPoint;
 
@@ -662,13 +674,13 @@ void GaussHitRecovery::produce(art::Event& e)
       // Then, assign any matches to the overall map's vectors
       for ( unsigned int i=0; i<(pcaVectors.size()-1); ++i ) {
         auto const& pca1 = pcaVectors[i];
-        // Check this against the other line-like PCAxis objects
+        // Check this against the other line-like PCAxis objects not already considered
         for ( unsigned int j=i+1; j<pcaVectors.size(); ++j ) {
           auto const& pca2 = pcaVectors[j];
           // Check if this point is within the tolerance of the PCAxis "cone"
           double vAngle = ( 180./TMath::Pi() )*pca1.Angle( pca2 );
           vAngle = std::min( vAngle, 180.-vAngle );
-          if( vAngle > fPCAxisTolerance ) continue; // doesn't pass tolerance
+          if( vAngle > fPCAxisTolerance ) continue; // doesn't pass "pointing"/"angular" tolerance
 
           for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
             if ( pcaClusterPoint.at(i).find(iPlaneID)==pcaClusterPoint.at(i).end() ||
@@ -688,7 +700,7 @@ void GaussHitRecovery::produce(art::Event& e)
       } // end pca1 loop
     } // end loop reduced hit labels
 
-    // Print out how many entries we have per plane in the linreg saver:
+    // Print out how many entries we have per plane in the pcaxis info saver:
     std::string printInfo = "Processing:\n ";
     for( geo::PlaneID const& thisPlaneID : fGeom->IteratePlaneIDs() ){
       printInfo += thisPlaneID.toString() + " pcaxis groupings = ";
@@ -698,7 +710,7 @@ void GaussHitRecovery::produce(art::Event& e)
         printInfo += std::to_string(allPcaClusterPoint[ thisPlaneID ].size()) + " ";
       printInfo += "\n ";
     }
-    mf::LogWarning("GaussHitRecovery") << printInfo;
+    mf::LogInfo("GaussHitRecovery") << printInfo;
 
     // Now loop through all hits and see if we want to recover them:
     for ( auto const& iLabel : fHitsLabelVec ) {
@@ -739,6 +751,7 @@ void GaussHitRecovery::produce(art::Event& e)
           if ( fSkipRecoveryPlane == (int)iWire.Plane ) isSkippedPlane = true;
           if ( isReduc || isSkippedPlane ) break;
           if ( wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end() ) continue;
+          // TODO: is looping through like this and checking == on Tick and RMS the best way?
           for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
             if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
               isReduc = true;
@@ -793,6 +806,7 @@ void GaussHitRecovery::produce(art::Event& e)
               hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(2);
             }
             else {
+              // in case we already found this hit with this method
               bool alreadyThisMethod = false;
               for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ] ) {
                 if ( recoveryMethod==2 ) {
@@ -810,7 +824,14 @@ void GaussHitRecovery::produce(art::Event& e)
 
   } // end if fUseReducHitPCAxis
 
-  // Now fill up the recovered hits
+
+  /////////////////////////////////////////////////////////////////////
+  //
+  // STEP 3: Now we have all the recovery attempts, let's see what we
+  //         should put back into hit set and then put that into the evt
+  //
+  /////////////////////////////////////////////////////////////////////
+
   for ( auto const& iHitStruct : hitsPossiblyRecovered ) {
     auto const& thisWireID = iHitStruct.stHit.WireID();
     float thisWireTick = iHitStruct.stHit.PeakTime();
