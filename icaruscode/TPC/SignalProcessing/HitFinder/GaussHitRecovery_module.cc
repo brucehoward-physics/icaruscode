@@ -638,7 +638,11 @@ void GaussHitRecovery::produce(art::Event& e)
 
         std::vector< art::Ptr<recob::PCAxis> > pcas = fmpca.at(iPFP.key());
 
-        if ( pcas.size()!=2 ) {
+        if ( pcas.size()==0 ) {
+          mf::LogWarning("GaussHitRecovery") << "WARNING!! Looking at PFP without 2 PCAxis objects (it's 0!). Continuing to next PFP";
+          continue;
+        }
+        else if ( pcas.size()!=2 ) {
           mf::LogWarning("GaussHitRecovery") << "WARNING!! Looking at PFP without 2 PCAxis objects. Curious!";
         }
 
