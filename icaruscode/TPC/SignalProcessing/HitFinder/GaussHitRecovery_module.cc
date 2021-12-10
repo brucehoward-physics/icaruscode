@@ -649,7 +649,7 @@ void GaussHitRecovery::produce(art::Event& e)
         auto const& ax1val = ax1->getEigenValues();
 
         // Pick out if PCAxis suggests it is linear, at least order of magnitude larger than 2nd and 3rd components.
-        if ( (ax1val[2] <= 10.*ax1val[1]) && (ax1val[2] <= 10.*ax1val[0]) ) continue;
+        if ( (ax1val[2] <= 10.*ax1val[1]) || (ax1val[2] <= 10.*ax1val[0]) ) continue;
 
         // Get a point in the PCAxis related cluster, map it plane by plane
         for ( auto const& iClst : clst ) {
