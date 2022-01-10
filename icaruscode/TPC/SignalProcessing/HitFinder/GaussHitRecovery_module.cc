@@ -80,6 +80,7 @@ private:
 
   float fMaxChi2NDF;         // max chi2 per ndf at/above which do not save the given linear regression
   float fLinregTolerance;    // allowed tolerance (in number of RMSs) for a hit from considered line (all 3 methods) to recover
+  float fPCAxisInterpTol;    // similar to fLinregTolerance, but for the PCAxis method
   int fSkipRecoveryPlane;    // set this value to a number (typically 0, 1, 2) to skip trying to recover hits from that plane
 
   bool fUseFindNeighbors;    // Default method. Look for interesting points in the reduced hit set.
@@ -105,6 +106,7 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   fReqNeighbors           ( p.get<int>("ReqNeighbors",4) ),
   fMaxChi2NDF             ( p.get<float>("MaxChi2NDF",11.) ),
   fLinregTolerance        ( p.get<float>("LinregTolerance",1.) ),
+  fPCAxisInterpTol        ( p.get<float>("PCAxisInterpTol",1.) ),
   fSkipRecoveryPlane      ( p.get<float>("SkipRecoveryPlane",-1) ),
   fUseFindNeighbors       ( p.get<bool>("UseFindNeighbors",true) ),
   fUseReducHitClusters    ( p.get<bool>("UseReducedHitClusters",false) ),
@@ -133,6 +135,8 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
 
   // basically from the GausHitFinder
   recob::HitCollectionCreator::declare_products(producesCollector(), fHitCreatorInstanceName, true, false);
+
+  std::cout << "(CONSTRUCTOR) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl; 
 }
 
 void GaussHitRecovery::produce(art::Event& e)
@@ -147,6 +151,8 @@ void GaussHitRecovery::produce(art::Event& e)
 
   // Geometry
   fGeom = lar::providerFrom<geo::Geometry>();
+
+  std::cout << "(PRODUCE #1) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
 
   /////////////////////////////////////////////////////////////////////
   //
@@ -568,6 +574,8 @@ void GaussHitRecovery::produce(art::Event& e)
   // Idea is to look for hits in the full set that are (between?) two clusters "pointing at" each other...
   // TODO: this method could probably be improved. Do we want to be using TVector3 or something else?
 
+  std::cout << "(PRODUCE #2) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
+
   std::map< geo::PlaneID, std::vector< std::pair<TVector3,TVector3> > >             allPcaVectors;
   std::map< geo::PlaneID, std::vector< std::pair<float,float> > >                   allPcaMagnitudes;
   // A pair of pair of floats -> wire,tick for pca1 (.first.{first,second}) & wire, tick for pca2 (.second.{first,second})
@@ -665,6 +673,8 @@ void GaussHitRecovery::produce(art::Event& e)
 
         // Get a point in the PCAxis related cluster, map it plane by plane
         unsigned int useClstIdx=0;
+	bool hasFoundHit = false;
+	art::Ptr< recob::Hit > useThisHit;
         for ( auto const& iClst : clst ) {
           std::vector< art::Ptr<recob::Hit> > clstHits = fmhit.at( iClst.key() );
           if ( clstHits.size() == 0 ) {
@@ -672,15 +682,26 @@ void GaussHitRecovery::produce(art::Event& e)
             continue;
           }
           // consider just hit[0]
-          if ( fSkipRecoveryPlane == (int)clstHits[0]->WireID().Plane ) continue;
+          if ( fSkipRecoveryPlane == (int)clstHits[0]->WireID().Plane ) {
+	    useClstIdx+=1;
+	    continue;
+	  }
           std::pair hitPoint = std::make_pair( clstHits[0]->WireID().Wire, clstHits[0]->PeakTime() );
           thisPcaClusterPoint[ clstHits[0]->WireID().asPlaneID() ] = hitPoint;
+	  // Now has a hit
+	  useThisHit = clstHits[0];
+	  hasFoundHit = true;
         }
 
         // if no clusters have hits, skip this pfp/pca...
         if ( useClstIdx==clst.size() ) continue;
+	// if hasFoundHit not set to true then skip this...
+	if ( !hasFoundHit ) continue;
         // get the spacepoint for the 0th hit:
-        std::vector< art::Ptr<recob::SpacePoint> > useSps = fmsps.at ( (fmhit.at( clst[useClstIdx].key() ).at(0)).key() );
+	//   -- WAS A TEST
+	//   std::vector< art::Ptr<recob::SpacePoint> > useSps = fmsps.at ( (fmhit.at( clst[useClstIdx].key() ).at(0)).key() );
+	//   -- NOW TRY
+	std::vector< art::Ptr<recob::SpacePoint> > useSps = fmsps.at( useThisHit.key() );
         // TODO: For now return all the spacepoints and see if any align when comparing potential "matches"
         //std::cout << "useSps.size() = " << useSps.size() << std::endl;
         if ( useSps.size()==0 ) continue;
@@ -713,9 +734,15 @@ void GaussHitRecovery::produce(art::Event& e)
             for ( auto const& spj : pcaSpacePoint[j] ) {
               auto const& pointI = spi->position();
               auto const& pointJ = spj->position();
+	      // If points are in different TPCs then this is not a valid match
+	      if ( fGeom->FindTPCAtPosition(pointI) != fGeom->FindTPCAtPosition(pointJ) ) continue;
+	      // If same TPC then continue checking...
               TVector3 rPoints( pointJ.X()-pointI.X(), pointJ.Y()-pointI.Y(), pointJ.Z()-pointI.Z() );
-              double rAngle = ( 180./TMath::Pi() )*pca1.Angle( rPoints );
-              rAngle = std::min( rAngle, 180.-rAngle );
+              double r1Angle = ( 180./TMath::Pi() )*pca1.Angle( rPoints );
+              r1Angle = std::min( r1Angle, 180.-r1Angle );
+	      double r2Angle = ( 180./TMath::Pi() )*pca2.Angle( rPoints );
+              r2Angle = std::min( r2Angle, 180.-r2Angle );
+	      double rAngle = std::min(r1Angle, r2Angle);
               if( rAngle < fPCAxisTolerance ) {
                 matchingSps = true;
                 break;
@@ -805,7 +832,17 @@ void GaussHitRecovery::produce(art::Event& e)
         if ( isReduc || isSkippedPlane ) continue; // if it's a reduced hit or on a plane we skip, don't try to save...
 
         // Consider both wire possibilities for hits in the overlap regions
-        for ( auto const& iWire : wires ) {
+	bool bhCheckRecoveredPCA = false;
+	float bhCheckMinRMSs = 99999.;
+	float bhCheckMinRMSloW = 0.;
+	float bhCheckMinRMShiW = 0.;
+	float bhCheckMinRMSloT = 0.;
+	float bhCheckMinRMShiT = 0.;
+	float bhCheckMinRMSPCA_X = 0.;
+	float bhCheckMinRMSPCA_Y = 0.;
+	float bhCheckMinRMSPCA_Z = 0.;
+
+	for ( auto const& iWire : wires ) {
           auto const& thisWire = iWire.Wire;
           auto thisPlaneID = iWire.asPlaneID();
 
@@ -833,12 +870,25 @@ void GaussHitRecovery::produce(art::Event& e)
             float connectSlope = (hiWireTick - loWireTick) / (hiWire - loWire);
             // b = y1 - m*x1
             float connectInt = hiWireTick - (connectSlope * hiWire);
-            // Is our hit within a tolerance of this line (fLinregTolerance)
+            // Is our hit within a tolerance of this line (fPCAxisInterpTol)
             float tickExpect = (connectSlope * thisWire) + connectInt;
-            if ( std::fabs(tickExpect-thisTime) > fLinregTolerance*thisRMS ) continue;
+            //if ( std::fabs(tickExpect-thisTime) > fPCAxisInterpTol*thisRMS ) continue; --> ADDED THIS TO THE FOLLOWING CHECKS TO HELP HAVE MORE TO PRINT OUT
+
+	    if ( std::fabs(tickExpect-thisTime)/thisRMS < bhCheckMinRMSs ) {
+	      bhCheckMinRMSs = std::fabs(tickExpect-thisTime)/thisRMS;
+
+	      bhCheckMinRMSloW = loWire;
+	      bhCheckMinRMSloT = loWireTick;
+	      bhCheckMinRMShiW = hiWire;
+	      bhCheckMinRMShiT = hiWireTick;
+	      bhCheckMinRMSPCA_X = allPcaVectors[ thisPlaneID ].at(iPtPair).first.X();
+	      bhCheckMinRMSPCA_Y = allPcaVectors[ thisPlaneID ].at(iPtPair).first.Y();
+	      bhCheckMinRMSPCA_Z = allPcaVectors[ thisPlaneID ].at(iPtPair).first.Z();
+	    }
 
             // Put the hit into the recovered hit vector if it's not already registered
-            if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
+            if ( std::fabs(tickExpect-thisTime) <= fPCAxisInterpTol*thisRMS &&
+		 hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
               std::vector< art::Ptr<recob::Wire> > hitWires = fmwire.at( iHitPtr.key() );
               if ( hitWires.size() == 0 ) throw cet::exception("GaussHitRecovery") << "Hit found with no associated wires...\n";
               else if ( hitWires.size() > 1 ) mf::LogWarning("GaussHitRecovery") << "Hit with >1 recob::Wire associated...";
@@ -847,8 +897,10 @@ void GaussHitRecovery::produce(art::Event& e)
 
               hitsPossiblyRecovered.push_back( std::move(tmp) );
               hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(2);
+
+	      bhCheckRecoveredPCA = true;
             }
-            else {
+            else if ( std::fabs(tickExpect-thisTime) <= fPCAxisInterpTol*thisRMS ) {
               // in case we already found this hit with this method
               bool alreadyThisMethod = false;
               for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ] ) {
@@ -858,9 +910,19 @@ void GaussHitRecovery::produce(art::Event& e)
                 }
               }
               if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(2);
+	      bhCheckRecoveredPCA = true;
             }
-            break;
+	    if ( bhCheckRecoveredPCA ) break;
+	    //bhCheckRecoveredPCA = true;
+            //break; ---> WHY THIS "LONELY" BREAK? Ah this was probably okay when we had the separate check on if it passed...
           } // end loop of point-pairs we're testing the hit against
+	  if ( thisPlaneID.Cryostat == 0 && thisPlaneID.TPC == 0 &&
+	       thisPlaneID.Plane == 1 && thisTime > 2500 && thisTime < 3000 && thisWire > 2410 && thisWire < 2490 ) {
+	    std::cout << "Hit being checked at w=" << thisWire << " t=" << thisTime << ", min #RMSs=" << bhCheckMinRMSs
+		      << " for match (" << bhCheckMinRMSloW << "," << bhCheckMinRMSloT << ")-(" << bhCheckMinRMShiW << "," << bhCheckMinRMShiT << ")"
+		      << " a vec (" << bhCheckMinRMSPCA_X << ", " << bhCheckMinRMSPCA_Y << ", " << bhCheckMinRMSPCA_Z << ")..."
+		      << " Recovered: " << (bhCheckRecoveredPCA ? "Yes" : "No") << std::endl;
+	  }
         } // end loop of wires for the hit
       } // end loop all hits
     } // end loop all hit labels
@@ -874,6 +936,8 @@ void GaussHitRecovery::produce(art::Event& e)
   //         should put back into hit set and then put that into the evt
   //
   /////////////////////////////////////////////////////////////////////
+
+  std::cout << "(PRODUCE #3) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
 
   for ( auto const& iHitStruct : hitsPossiblyRecovered ) {
     auto const& thisWireID = iHitStruct.stHit.WireID();

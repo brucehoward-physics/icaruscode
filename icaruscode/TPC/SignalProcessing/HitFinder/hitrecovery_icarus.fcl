@@ -13,6 +13,10 @@ hitRecoveryE:
   UseReducedHitPCAxis: false
   PCAxisTolerance: 10.
   PCAxisOnlyBetween: false
+  # sigma allowed for a hit to  be from the line segment (w,t space)
+  # in PCAxis method. Other methods default to 1 and are set with the
+  # LinregTolerance parameter
+  PCAxisInterpTol: 10.
 }
 
 hitRecoveryW:
@@ -28,6 +32,10 @@ hitRecoveryW:
   UseReducedHitPCAxis: false
   PCAxisTolerance: 10.
   PCAxisOnlyBetween: false
+  # sigma allowed for a hit to  be from the line segment (w,t space)
+  # in PCAxis method. Other methods default to 1 and are set with the
+  # LinregTolerance parameter
+  PCAxisInterpTol: 10.
 }
 
 END_PROLOG
