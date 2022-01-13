@@ -11,12 +11,17 @@ hitRecoveryE:
   UseFindNeighbors: false
   UseReducedHitClusters: true
   UseReducedHitPCAxis: false
-  PCAxisTolerance: 10.
+  UseReducHitPCAxisDCA: false
+  LinregTolerance: 1.
+  PCAxisTolerance: 15.
   PCAxisOnlyBetween: false
   # sigma allowed for a hit to  be from the line segment (w,t space)
   # in PCAxis method. Other methods default to 1 and are set with the
   # LinregTolerance parameter
   PCAxisInterpTol: 10.
+  # Some very preliminary settings for DCA PCAxis method (needs some work & may be overzealous)
+  DcaAllowedScdyRadii: 80
+  OverrideScdyRadii: 6.5
 }
 
 hitRecoveryW:
@@ -30,12 +35,17 @@ hitRecoveryW:
   UseFindNeighbors: false
   UseReducedHitClusters: true
   UseReducedHitPCAxis: false
-  PCAxisTolerance: 10.
+  UseReducHitPCAxisDCA: false
+  LinregTolerance: 1.
+  PCAxisTolerance: 15.
   PCAxisOnlyBetween: false
   # sigma allowed for a hit to  be from the line segment (w,t space)
   # in PCAxis method. Other methods default to 1 and are set with the
   # LinregTolerance parameter
   PCAxisInterpTol: 10.
+  # Some very preliminary settings for DCA PCAxis method (needs some work & may be overzealous)
+  DcaAllowedScdyRadii: 80
+  OverrideScdyRadii: 6.5
 }
 
 END_PROLOG

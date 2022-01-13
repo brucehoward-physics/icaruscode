@@ -22,6 +22,8 @@
 
 #include "art/Utilities/Globals.h"
 #include "larcore/Geometry/Geometry.h"
+#include "larcorealg/Geometry/WireGeo.h"
+#include "larcorealg/Geometry/TPCGeo.h"
 #include "art_root_io/TFileService.h"
 #include "lardataobj/RecoBase/Hit.h"
 #include "lardataobj/RecoBase/SpacePoint.h"
@@ -33,6 +35,10 @@
 
 #include "cetlib_except/exception.h"
 
+#include "lardata/DetectorInfoServices/DetectorClocksService.h"
+#include "lardata/DetectorInfoServices/DetectorPropertiesService.h"
+#include "lardata/DetectorInfoServices/LArPropertiesService.h"
+
 // C++
 #include <map>
 #include <vector>
@@ -42,6 +48,8 @@
 #include <unordered_set>
 #include <memory>
 #include <utility>
+#include <algorithm>
+#include <tuple>
 
 // ROOT
 #include "TVector3.h"
@@ -83,11 +91,16 @@ private:
   float fPCAxisInterpTol;    // similar to fLinregTolerance, but for the PCAxis method
   int fSkipRecoveryPlane;    // set this value to a number (typically 0, 1, 2) to skip trying to recover hits from that plane
 
-  bool fUseFindNeighbors;    // Default method. Look for interesting points in the reduced hit set.
-  bool fUseReducHitClusters; // Instead of looking for the interesting points in the hit map, take an input set of clusters.
-  bool fUseReducHitPCAxis;   // Third option - use input set of PCAxis objects.
+  bool fUseFindNeighbors;     // Default method. Look for interesting points in the reduced hit set.
+  bool fUseReducHitClusters;  // Instead of looking for the interesting points in the hit map, take an input set of clusters.
+  bool fUseReducHitPCAxis;    // Third option - use input set of PCAxis objects and interpolate/extrapolate matches.
+  bool fUseReducHitPCAxisDCA; // Fourth option - check the wire line of each 2d hit against the PCAxes formed from reduced hits (based on idea from Tracy Usher)
+
   bool fPCAxisOnlyBetween;   // PCAxis option -- If true, only recover hits between 2 groupings on a plane, not along the extension
   float fPCAxisTolerance;    // PCAxis option -- Defines the anglular tolerance (in degrees) in PCAxis method.
+
+  float fAllowedScdyRadii;   // For the "PCAxisDCA" option, how many secondary radii are allowed for the minDistance to accept the hit.
+  float fOverrideScdyRadii;  // If this value is set > 0, this determines the MAX allowed minDistance, in cm (default -1)
 
   int fMinMethodsSuccess;    // how many methods does a hit need to pass to be saved
                              // This plus true/false for the three methods allows you to AND or OR the methods essentially
@@ -111,16 +124,20 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   fUseFindNeighbors       ( p.get<bool>("UseFindNeighbors",true) ),
   fUseReducHitClusters    ( p.get<bool>("UseReducedHitClusters",false) ),
   fUseReducHitPCAxis      ( p.get<bool>("UseReducedHitPCAxis",false) ),
+  fUseReducHitPCAxisDCA   ( p.get<bool>("UseReducHitPCAxisDCA",false) ),
   fPCAxisOnlyBetween      ( p.get<bool>("PCAxisOnlyBetween",false) ),
   fPCAxisTolerance        ( p.get<float>("PCAxisTolerance",5.) ),
+  fAllowedScdyRadii       ( p.get<float>("DcaAllowedScdyRadii",5.) ),
+  fOverrideScdyRadii      ( p.get<float>("OverrideScdyRadii",-1.) ),
   fMinMethodsSuccess      ( p.get<int>("MinMethodsSuccess",0) )
 {
   // Call appropriate consumes<>() for any products to be retrieved by this module.
 
-  const int usingNeighbors = fUseFindNeighbors    ? 1 : 0;
-  const int usingClusters  = fUseReducHitClusters ? 1 : 0;
-  const int usingPCAxis    = fUseReducHitPCAxis   ? 1 : 0;
-  const int numMethods = usingNeighbors + usingClusters + usingPCAxis;
+  const int usingNeighbors = fUseFindNeighbors     ? 1 : 0;
+  const int usingClusters  = fUseReducHitClusters  ? 1 : 0;
+  const int usingPCAxis    = fUseReducHitPCAxis    ? 1 : 0;
+  const int usingPCAxisDCA = fUseReducHitPCAxisDCA ? 1 : 0;
+  const int numMethods = usingNeighbors + usingClusters + usingPCAxis + usingPCAxisDCA;
   if ( numMethods==0 )
     throw cet::exception("GaussHitRecovery") << "Trying to run HitRecovery with no methods activated... !\n";
   if ( numMethods < fMinMethodsSuccess )
@@ -675,22 +692,62 @@ void GaussHitRecovery::produce(art::Event& e)
         unsigned int useClstIdx=0;
 	bool hasFoundHit = false;
 	art::Ptr< recob::Hit > useThisHit;
+
+	//std::cout << "\n" << clst.size() << std::endl;
+	std::cout << "sps sizes: ";
         for ( auto const& iClst : clst ) {
           std::vector< art::Ptr<recob::Hit> > clstHits = fmhit.at( iClst.key() );
           if ( clstHits.size() == 0 ) {
             useClstIdx+=1;
+	    std::cout << "skipping a cluster." << std::endl;
             continue;
           }
-          // consider just hit[0]
-          if ( fSkipRecoveryPlane == (int)clstHits[0]->WireID().Plane ) {
+	  // BH 11 Jan 2021: try to grab just the "lowest" hit instead of this sort... but... there are repeated hits?!?!
+	  unsigned int lowestHit = 0; // use this hit to store stuff below...
+	  float loHitWire  = 9999999999.;
+	  float loHitRms   = 9999999999.;
+	  float loHitPTime = 9999999999.;
+	  //std::cout << "getting min...";
+	  for ( unsigned int iHitNo = 0; iHitNo < clstHits.size(); ++iHitNo ) {
+	    if      ( clstHits[iHitNo]->WireID().Wire > loHitWire ) continue;
+	    else if ( clstHits[iHitNo]->WireID().Wire == loHitWire ) {
+	      if ( clstHits[iHitNo]->PeakTime() > loHitPTime ) continue;
+	      else if ( clstHits[iHitNo]->PeakTime() == loHitPTime ) {
+		if ( clstHits[iHitNo]->RMS() >= loHitRms ) continue;
+		else {
+		  lowestHit  = iHitNo;
+		  loHitWire  = clstHits[iHitNo]->WireID().Wire;
+		  loHitPTime = clstHits[iHitNo]->PeakTime();
+		  loHitRms   = clstHits[iHitNo]->RMS();
+		  continue;
+		}
+	      }
+	      // if peaktime is lower
+	      lowestHit  = iHitNo;
+	      loHitWire  = clstHits[iHitNo]->WireID().Wire;
+	      loHitPTime = clstHits[iHitNo]->PeakTime();
+	      loHitRms   = clstHits[iHitNo]->RMS();
+	      continue;
+	    }
+	    // if wire is lower
+	    lowestHit  = iHitNo;
+	    loHitWire  = clstHits[iHitNo]->WireID().Wire;
+	    loHitPTime = clstHits[iHitNo]->PeakTime();
+	    loHitRms   = clstHits[iHitNo]->RMS();
+	    continue;
+	  }
+	  //std::cout << "finished getting min." << std::endl;
+	  // Now use "min" to get the necessary products
+	  if ( fSkipRecoveryPlane == (int)clstHits[lowestHit]->WireID().Plane ) {
 	    useClstIdx+=1;
 	    continue;
 	  }
-          std::pair hitPoint = std::make_pair( clstHits[0]->WireID().Wire, clstHits[0]->PeakTime() );
-          thisPcaClusterPoint[ clstHits[0]->WireID().asPlaneID() ] = hitPoint;
-	  // Now has a hit
-	  useThisHit = clstHits[0];
-	  hasFoundHit = true;
+	  if ( !hasFoundHit ) {
+	    useThisHit = clstHits[lowestHit];
+	    hasFoundHit = true;
+	  }
+	  std::pair hitPoint = std::make_pair( clstHits[0]->WireID().Wire, clstHits[0]->PeakTime() );
+	  thisPcaClusterPoint[ clstHits[0]->WireID().asPlaneID() ] = hitPoint;
         }
 
         // if no clusters have hits, skip this pfp/pca...
@@ -704,6 +761,7 @@ void GaussHitRecovery::produce(art::Event& e)
 	std::vector< art::Ptr<recob::SpacePoint> > useSps = fmsps.at( useThisHit.key() );
         // TODO: For now return all the spacepoints and see if any align when comparing potential "matches"
         //std::cout << "useSps.size() = " << useSps.size() << std::endl;
+	std::cout << useSps.size() << " ";
         if ( useSps.size()==0 ) continue;
         pcaSpacePoint.push_back( useSps );
 
@@ -714,6 +772,7 @@ void GaussHitRecovery::produce(art::Event& e)
 
         pcaMagnitudes.push_back( (float)ax1val[2] );
       }
+      std::cout << "... end pfps." << std::endl;
 
       // Look at the PCAs:
       // The objects pcaClusterPoint, pcaVectors, pcaMagnitudes should all line up in terms of entries, so can be matched
@@ -841,6 +900,8 @@ void GaussHitRecovery::produce(art::Event& e)
 	float bhCheckMinRMSPCA_X = 0.;
 	float bhCheckMinRMSPCA_Y = 0.;
 	float bhCheckMinRMSPCA_Z = 0.;
+	std::vector< std::pair<float,float> > allLookedAtPointsW;
+	std::vector< std::pair<float,float> > allLookedAtPointsT;
 
 	for ( auto const& iWire : wires ) {
           auto const& thisWire = iWire.Wire;
@@ -860,6 +921,10 @@ void GaussHitRecovery::produce(art::Event& e)
                                                allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.first;
             float hiWireTick = firstIsLoWire ? allPcaClusterPoint[ thisPlaneID ].at(iPtPair).second.second :
                                                allPcaClusterPoint[ thisPlaneID ].at(iPtPair).first.second;
+
+	    // All looked at pairs!
+	    allLookedAtPointsW.push_back( std::make_pair(loWire,hiWire) );
+	    allLookedAtPointsT.push_back( std::make_pair(loWireTick,hiWireTick) );
 
             // if we only want to use hits between 2 groups
             if ( fPCAxisOnlyBetween && (thisWire < loWire || thisWire > hiWire) ) continue;
@@ -922,12 +987,301 @@ void GaussHitRecovery::produce(art::Event& e)
 		      << " for match (" << bhCheckMinRMSloW << "," << bhCheckMinRMSloT << ")-(" << bhCheckMinRMShiW << "," << bhCheckMinRMShiT << ")"
 		      << " a vec (" << bhCheckMinRMSPCA_X << ", " << bhCheckMinRMSPCA_Y << ", " << bhCheckMinRMSPCA_Z << ")..."
 		      << " Recovered: " << (bhCheckRecoveredPCA ? "Yes" : "No") << std::endl;
+	    std::cout << "  checked: ";
+	    for ( auto const& lookedPair : allLookedAtPointsW ) {
+	      std::cout << "(" << lookedPair.first << ", " << lookedPair.second << ") ";
+	    }
+	    std::cout << std::endl;
 	  }
         } // end loop of wires for the hit
       } // end loop all hits
     } // end loop all hit labels
 
   } // end if fUseReducHitPCAxis
+
+
+  // And the fourth type of recovery, switched on using UseReducHitPCAxisDCA
+  // This method will loop through all 2d hits and if it's not already a hit in the reduced
+  //   hit set then loop over the line-like PCAxis vectors and see if this hit is close to
+  //   the line they form - only compare hits in given TPC to PCAXis vectors in same TPC...
+  if ( fUseReducHitPCAxisDCA ) {
+    // As in Pandora
+    auto const detProp = art::ServiceHandle<detinfo::DetectorPropertiesService const>()->DataFor(e);
+
+    std::map< geo::TPCID, std::vector< std::tuple<TVector3,TVector3,float> > > thePCAxes; // PCAxis Vector, PCAxis Point, Secondary Radius
+
+    for ( auto const& iLabel : fReducHitsLabelVec ) {
+      // Get PFParticles and necessary associations
+      art::Handle< std::vector<recob::PFParticle> > pfpsHandle;
+      std::vector< art::Ptr<recob::PFParticle> > pfps;
+      if ( e.getByLabel(iLabel,pfpsHandle) ) {
+	art::fill_ptr_vector(pfps,pfpsHandle);
+      }
+      else{
+	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::PFParticle with label " << iLabel;
+	return;
+      }
+
+      art::FindManyP<recob::SpacePoint> fmsps(pfpsHandle, e, iLabel);
+      if( !fmsps.isValid() ){
+	mf::LogError("GaussHitRecovery") << "Error in validity of fmsps. Returning.";
+	return;
+      }
+
+      art::FindManyP<recob::PCAxis> fmpca(pfpsHandle, e, iLabel);
+      if( !fmpca.isValid() ){
+	mf::LogError("GaussHitRecovery") << "Error in validity of fmpca. Returning.";
+	return;
+      }
+
+      // Get Spacepoints
+      art::Handle< std::vector<recob::SpacePoint> > spaceptsHandle;
+      std::vector< art::Ptr<recob::SpacePoint> > spacepts;
+      if ( e.getByLabel(iLabel,spaceptsHandle) ) {
+	art::fill_ptr_vector(spacepts,spaceptsHandle);
+      }
+      else{
+	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::SpacePoint with label " << iLabel;
+        return;
+      }
+
+      art::FindManyP<recob::Hit> fmhit(spaceptsHandle, e, iLabel);
+      if( !fmhit.isValid() ){
+	mf::LogError("GaussHitRecovery") << "Error in validity of fmhit. Returning.";
+	return;
+      }
+
+      // Loop through PFParticles
+      for ( auto const& iPFP : pfps ) {
+	std::vector< art::Ptr<recob::PCAxis> > pcas = fmpca.at(iPFP.key());
+
+	if ( pcas.size()==0 ) {
+	  mf::LogWarning("GaussHitRecovery") << "WARNING!! Looking at PFP without 2 PCAxis objects (it's 0!). Continuing to next PFP";
+	  continue;
+	}
+	else if ( pcas.size()!=2 ) {
+	  mf::LogWarning("GaussHitRecovery") << "WARNING!! Looking at PFP without 2 PCAxis objects. Curious!";
+	}
+
+	auto const& ax1 = pcas[0];
+
+	// Principal axes:
+	auto const& ax1vec = ax1->getEigenVectors();
+	auto const& ax1val = ax1->getEigenValues();
+
+	// Pick out if PCAxis suggests it is linear, at least order of magnitude larger than 2nd and 3rd components.
+	if ( (ax1val[2] <= 10.*ax1val[1]) || (ax1val[2] <= 10.*ax1val[0]) ) continue;
+
+	// If fairly linear, pick the most upstream spacepoint (if matching z then prioritize lower y and lower fabs(x))
+	std::vector< art::Ptr<recob::SpacePoint> > sps = fmsps.at(iPFP.key());
+
+	unsigned int useSps = 0;
+	float minX = 9999999.;
+	float minY = 9999999.;
+	float minZ = 9999999.;
+	for ( unsigned int iSps=0; iSps < sps.size(); ++iSps ) {
+	  auto const& thisPos = sps[iSps]->position();
+	  if      ( thisPos.Z() >  minZ ) continue;
+	  else if ( thisPos.Z() == minZ ) {
+	    if      ( thisPos.Y() > minY ) continue;
+	    else if ( thisPos.Y() == minY ) {
+	      if      ( fabs(thisPos.X()) > minX ) continue;
+	      else    {
+		useSps = iSps;
+		minX = fabs(thisPos.X());
+		minY = thisPos.Y();
+		minZ = thisPos.Z();
+		continue;
+	      }
+	    }
+	    // then Y < min Y, so use
+	    useSps = iSps;
+	    minX = fabs(thisPos.X());
+	    minY = thisPos.Y();
+	    minZ = thisPos.Z();
+	    continue;
+	  }
+	  // then Z < min Z, so use
+	  useSps = iSps;
+	  minX = fabs(thisPos.X());
+	  minY = thisPos.Y();
+	  minZ = thisPos.Z();
+	  continue;
+	}
+
+	auto const& theSpsPos = sps[useSps]->position();
+
+	//geo::TPCID thisTPCID_sps = fGeom->FindTPCAtPosition( sps[useSps]->position() ); // tpcid where the spacepoint claims to be
+
+	// Check if the spacepoint position is within some tolerance of the TPC active volume for which it corresponds. (right now hard code 3cm)
+	//   i.e. check if it is too far out of time for us to care about.
+	// Note: I think we don't care about order of hits in assn to spacepoint since I think all should be same TPC, esp. in reduced hits
+	std::vector< art::Ptr< recob::Hit > > spsHits = fmhit.at( sps[useSps].key() );
+	if ( spsHits.size() == 0 ) continue; // skip this PCAxis if the sps has 0 hits...
+	geo::TPCID thisTPCID = spsHits[0]->WireID().asTPCID();
+
+	geo::TPCGeo const& thisTPCGeo = fGeom->TPC(thisTPCID);
+	auto const& hitVolBox = thisTPCGeo.ActiveBoundingBox();
+
+	if ( hitVolBox.MinX() - theSpsPos.X() > 3. ||
+	     theSpsPos.X() - hitVolBox.MaxX() > 3. ||
+	     hitVolBox.MinY() - theSpsPos.Y() > 3. ||
+             theSpsPos.Y() - hitVolBox.MaxY() > 3. ||
+	     hitVolBox.MinZ() - theSpsPos.Z() > 3. ||
+             theSpsPos.Z() - hitVolBox.MaxZ() > 3. )
+	  {
+	    continue;
+	  }
+
+	// The stuff we want to save
+	TVector3 thisSps( theSpsPos.X(), theSpsPos.Y(), theSpsPos.Z() );
+	TVector3 mainPCAxis( ax1vec[2].at(0), ax1vec[2].at(1), ax1vec[2].at(2) );
+	float scdyRadius = ax1val[1] > ax1val[0] ? ax1val[1] : ax1val[0];
+
+	// And save this in our map!
+	thePCAxes[ thisTPCID ].push_back( std::make_tuple(mainPCAxis, thisSps, scdyRadius) );
+      } // loop PFPs from reduced hits
+    } // end loop reduced hit labels
+
+    // Now loop through all hits and see if we want to recover them:
+    for ( auto const& iLabel : fHitsLabelVec ) {
+      art::Handle< std::vector<recob::Hit> > hitsHandle;
+      std::vector< art::Ptr<recob::Hit> > hits;
+      if ( e.getByLabel(iLabel,hitsHandle) ) {
+	art::fill_ptr_vector(hits,hitsHandle);
+      }
+      else{
+	mf::LogWarning("GaussHitRecovery") << "Event failed to find recob::Hit with label " << iLabel;
+	return;
+      }
+
+      art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
+      if( !fmwire.isValid() ){
+	mf::LogError("GaussHitRecovery") << "Error in validity of fmwire. Returning.";
+	return;
+      }
+
+      for ( auto const& iHitPtr : hits ) {
+	auto const& thisTime = iHitPtr->PeakTime();
+	auto const& thisRMS = iHitPtr->RMS();
+	std::vector< geo::WireID > wires = fGeom->ChannelToWire( iHitPtr->Channel() );
+
+	// Check if the hit is already in reduced set and/or if we're skipping this plane
+	bool isReduc = false;
+	bool isSkippedPlane = false;
+	for ( auto const& iWire : wires ) {
+	  if ( fSkipRecoveryPlane == (int)iWire.Plane ) isSkippedPlane = true;
+	  if ( isReduc || isSkippedPlane ) break;
+	  if ( wireToReducHitsTimeRMS.find(iWire) == wireToReducHitsTimeRMS.end() ) continue;
+	  // TODO: is looping through like this and checking == on Tick and RMS the best way?
+	  for ( auto const& iTimeRMS : wireToReducHitsTimeRMS[iWire] ){
+	    if ( thisTime == iTimeRMS.first && thisRMS == iTimeRMS.second ) {
+	      isReduc = true;
+	      break;
+	    }
+	  }
+	}
+	if ( isReduc || isSkippedPlane ) continue; // if it's a reduced hit or on a plane we skip, don't try to save...
+
+	// If multiple wires for the hit then check both
+	for ( auto const& iWire : wires ) {
+	  auto const& thisWire = iWire.Wire;
+	  auto thisPlaneID = iWire.asPlaneID();
+	  auto thisTPCID   = iWire.asTPCID();
+
+	  // As from Pandora
+	  double xVal = detProp.ConvertTicksToX(thisTime, thisPlaneID);
+
+	  geo::WireGeo const& thisWireGeo = fGeom->Wire(iWire);
+	  auto const& thisWireXYZ = thisWireGeo.GetCenter();
+	  auto const& thisWireDir = thisWireGeo.Direction();
+	  double yVal = thisWireXYZ.Y();
+	  double zVal = thisWireXYZ.Z();
+
+	  TVector3 thisWireLinePt(xVal, yVal, zVal);
+	  TVector3 thisWireLineDir(thisWireDir.X(), thisWireDir.Y(), thisWireDir.Z());
+
+	  // Now check the PCAxis lines
+	  // We'll get the distances using formulas from Wikipedia:
+	  //   1. en.wikipedia.org/wiki/Skew_lines#Distance
+	  //   2. en.wikipedia.org/wiki/Distance_from_a_point_to_a_line
+	  for ( auto const& iPCA : thePCAxes[thisTPCID] ) {
+	    // Comparing the two lines:
+	    TVector3 n_system = std::get<0>(iPCA).Cross(thisWireLineDir);
+	    TVector3 n_wire   = thisWireLineDir.Cross(n_system); // n2
+	    TVector3 n_pcaxis = std::get<0>(iPCA).Cross(n_system); // n1
+	    // p1 = std::get<1>(iPCA), d1 = std::get<0>(iPCA)
+	    // p2 = thisWireLinePt, d2 = thisWireLineDir
+	    TVector3 c1Vec = std::get<1>(iPCA) + ( (thisWireLinePt-std::get<1>(iPCA)).Dot(n_wire) / std::get<0>(iPCA).Dot(n_wire) ) * std::get<0>(iPCA);
+	    TVector3 c2Vec = thisWireLinePt + ( (std::get<1>(iPCA)-thisWireLinePt).Dot(n_pcaxis) / thisWireLineDir.Dot(n_pcaxis) ) * thisWireLineDir;
+	    // TODO: If c1Vec and c2Vec are in the active volume then it's fine to use. If not then we should use points along the wire
+	    //       and do distance from point to PCAxis line...
+	    double minDist = (c1Vec-c2Vec).Mag();
+	    // If min dist is < some number of secondary radii then accept the hit
+	    if ( fOverrideScdyRadii <= 0 && minDist > fAllowedScdyRadii*std::get<2>(iPCA) ) continue;
+	    if ( fOverrideScdyRadii > 0 && minDist > fOverrideScdyRadii ) continue;
+
+	    // Partially start to address above TODO -> check if c1 or c2 is more than 3cm from active volume end...
+	    // -- But this doesn't then check the min inside the volume, hence "partial"
+	    geo::TPCGeo const& thisTPCGeo = fGeom->TPC(thisTPCID);
+	    auto const& hitVolBox = thisTPCGeo.ActiveBoundingBox();
+	    if ( hitVolBox.MinX() - c1Vec.X() > 3. ||
+		 c1Vec.X() - hitVolBox.MaxX() > 3. ||
+		 hitVolBox.MinY() - c1Vec.Y() > 3. ||
+		 c1Vec.Y() - hitVolBox.MaxY() > 3. ||
+		 hitVolBox.MinZ() - c1Vec.Z() > 3. ||
+		 c1Vec.Z() - hitVolBox.MaxZ() > 3. )
+	      {
+		continue;
+	      }
+	    if ( hitVolBox.MinX() - c2Vec.X() > 3. ||
+                 c2Vec.X() - hitVolBox.MaxX() > 3. ||
+                 hitVolBox.MinY() - c2Vec.Y() > 3. ||
+                 c2Vec.Y() - hitVolBox.MaxY() > 3. ||
+                 hitVolBox.MinZ() - c2Vec.Z() > 3. ||
+                 c2Vec.Z() - hitVolBox.MaxZ() > 3. )
+              {
+                continue;
+              }
+
+	    // Print out the hits being recovered in test event's region of interest
+	    if ( thisPlaneID.Cryostat == 0 && thisPlaneID.TPC == 0 &&
+		 thisPlaneID.Plane == 1 && thisTime > 2500 && thisTime < 3000 && thisWire > 2410 && thisWire < 2490 ) {
+	      std::cout << "Hit being checked at w=" << thisWire << " t=" << thisTime << ","
+			<< " Recovered at dist " << minDist
+			<< " cm by match to vec (" << std::get<0>(iPCA).X() << ", " << std::get<0>(iPCA).Y() << ", " << std::get<0>(iPCA).Z() << ")," 
+			<< " Incuding spacepoint (" << std::get<1>(iPCA).X() << ", " << std::get<1>(iPCA).Y() << ", " << std::get<1>(iPCA).Z() << "),"
+			<< " With scdy radius = " << std::get<2>(iPCA) << " (override = " << fOverrideScdyRadii << ")." << std::endl;
+	    }
+
+	    // Put the hit into the recovered hit vector if it's not already registered
+	    if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
+	      std::vector< art::Ptr<recob::Wire> > hitWires = fmwire.at( iHitPtr.key() );
+	      if ( hitWires.size() == 0 ) throw cet::exception("GaussHitRecovery") << "Hit found with no associated wires...\n";
+	      else if ( hitWires.size() > 1 ) mf::LogWarning("GaussHitRecovery") << "Hit with >1 recob::Wire associated...";
+
+	      hitstruct tmp{*iHitPtr,hitWires[0]};
+
+	      hitsPossiblyRecovered.push_back( std::move(tmp) );
+	      hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(3);
+	    }
+	    else {
+	      // in case we already found this hit with this method
+	      bool alreadyThisMethod = false;
+	      for ( auto const& recoveryMethod : hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ] ) {
+		if ( recoveryMethod==3 ) {
+		  alreadyThisMethod = true;
+		  break;
+		}
+	      }
+	      if ( !alreadyThisMethod ) hitToRecoveryMethodMap[ std::make_pair(iWire,thisTime) ].push_back(3);
+	    }
+	    break; // we've succeeded to recover this hit, no need to check further
+	  } // end loop through PCAxis to check
+	} // end loop through wires for the hit
+      } // end loop through hits
+    } // end loop through hit labels
+  }
 
 
   /////////////////////////////////////////////////////////////////////
