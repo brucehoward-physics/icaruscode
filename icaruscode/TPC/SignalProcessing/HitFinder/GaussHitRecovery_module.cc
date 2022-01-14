@@ -45,7 +45,7 @@
 #include <iostream>
 #include <string>
 #include <cmath>
-#include <unordered_set>
+#include <set>
 #include <memory>
 #include <utility>
 #include <algorithm>
@@ -373,18 +373,33 @@ void GaussHitRecovery::produce(art::Event& e)
 
         if ( clusterHits.size()==0 ) continue;
 
+	std::set< std::tuple<int,int,int,float,float,float> > uniqueHits; // plane id as (c, t, p), wire, tick, rms
         std::map< geo::PlaneID, std::vector<int> > wire_list;
         std::map< geo::PlaneID, std::vector<float> > tick_list;
         std::map< geo::PlaneID, std::vector<float> > rms_list;
 
+	std::cout << "Cluster hits in ROI !!!!" << std::endl;
         for( auto const& iHitPtr : clusterHits ) {
           geo::WireID const& wID = iHitPtr->WireID();
           if ( fSkipRecoveryPlane == (int)wID.Plane ) continue;
 
-          tick_list[wID.asPlaneID()].push_back( iHitPtr->PeakTime() );
-          rms_list[wID.asPlaneID()].push_back( iHitPtr->RMS() );
-          wire_list[wID.asPlaneID()].push_back( wID.Wire );
+	  uniqueHits.emplace( std::make_tuple(wID.asPlaneID().Cryostat, wID.asPlaneID().TPC, wID.asPlaneID().Plane, wID.Wire, iHitPtr->PeakTime(), iHitPtr->RMS()) );
+	}
+
+	for ( auto const& iTupleHit : uniqueHits ) {
+	  geo::PlaneID tuplePlaneID = geo::PlaneID(std::get<0>(iTupleHit),std::get<1>(iTupleHit),std::get<2>(iTupleHit));
+          tick_list[ tuplePlaneID ].push_back( std::get<4>(iTupleHit) );
+          rms_list[  tuplePlaneID ].push_back( std::get<5>(iTupleHit) );
+          wire_list[ tuplePlaneID ].push_back( std::get<3>(iTupleHit) );
+
+	  if ( std::get<0>(iTupleHit) == 0 && std::get<1>(iTupleHit) == 0 &&
+               ( std::get<2>(iTupleHit) == 1 || std::get<2>(iTupleHit) == 2 ) ) {
+	    // prev also check things like: iHitPtr->PeakTime() > 2500 && iHitPtr->PeakTime() < 3000 && wID.Wire > 2410 && wID.Wire < 2490 ) {
+	    std::cout << std::get<3>(iTupleHit) << " " << std::get<4>(iTupleHit) << " " << std::get<5>(iTupleHit) << std::endl;
+	  }
+
         }
+	std::cout << "------------------------" << std::endl;
 
         for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
           if ( tick_list.find(iPlaneID) == tick_list.end() ) continue;
