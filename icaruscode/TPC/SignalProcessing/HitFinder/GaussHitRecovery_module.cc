@@ -153,7 +153,7 @@ GaussHitRecovery::GaussHitRecovery(fhicl::ParameterSet const& p)
   // basically from the GausHitFinder
   recob::HitCollectionCreator::declare_products(producesCollector(), fHitCreatorInstanceName, true, false);
 
-  std::cout << "(CONSTRUCTOR) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl; 
+  //std::cout << "(CONSTRUCTOR) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl; 
 }
 
 void GaussHitRecovery::produce(art::Event& e)
@@ -169,7 +169,7 @@ void GaussHitRecovery::produce(art::Event& e)
   // Geometry
   fGeom = lar::providerFrom<geo::Geometry>();
 
-  std::cout << "(PRODUCE #1) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
+  //std::cout << "(PRODUCE #1) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
 
   /////////////////////////////////////////////////////////////////////
   //
@@ -378,7 +378,7 @@ void GaussHitRecovery::produce(art::Event& e)
         std::map< geo::PlaneID, std::vector<float> > tick_list;
         std::map< geo::PlaneID, std::vector<float> > rms_list;
 
-	std::cout << "Cluster hits in ROI !!!!" << std::endl;
+	//std::cout << "Cluster hits in ROI !!!!" << std::endl;
         for( auto const& iHitPtr : clusterHits ) {
           geo::WireID const& wID = iHitPtr->WireID();
           if ( fSkipRecoveryPlane == (int)wID.Plane ) continue;
@@ -395,11 +395,11 @@ void GaussHitRecovery::produce(art::Event& e)
 	  if ( std::get<0>(iTupleHit) == 0 && std::get<1>(iTupleHit) == 0 &&
                ( std::get<2>(iTupleHit) == 1 || std::get<2>(iTupleHit) == 2 ) ) {
 	    // prev also check things like: iHitPtr->PeakTime() > 2500 && iHitPtr->PeakTime() < 3000 && wID.Wire > 2410 && wID.Wire < 2490 ) {
-	    std::cout << std::get<3>(iTupleHit) << " " << std::get<4>(iTupleHit) << " " << std::get<5>(iTupleHit) << std::endl;
+	    //std::cout << std::get<3>(iTupleHit) << " " << std::get<4>(iTupleHit) << " " << std::get<5>(iTupleHit) << std::endl;
 	  }
 
         }
-	std::cout << "----- b4: " << clusterHits.size() << " after: " << uniqueHits.size() << std::endl;
+	//std::cout << "----- b4: " << clusterHits.size() << " after: " << uniqueHits.size() << std::endl;
 
         for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
           if ( tick_list.find(iPlaneID) == tick_list.end() ) continue;
@@ -606,7 +606,7 @@ void GaussHitRecovery::produce(art::Event& e)
   // Idea is to look for hits in the full set that are (between?) two clusters "pointing at" each other...
   // TODO: this method could probably be improved. Do we want to be using TVector3 or something else?
 
-  std::cout << "(PRODUCE #2) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
+  //std::cout << "(PRODUCE #2) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
 
   std::map< geo::PlaneID, std::vector< std::pair<TVector3,TVector3> > >             allPcaVectors;
   std::map< geo::PlaneID, std::vector< std::pair<float,float> > >                   allPcaMagnitudes;
@@ -709,12 +709,12 @@ void GaussHitRecovery::produce(art::Event& e)
 	art::Ptr< recob::Hit > useThisHit;
 
 	//std::cout << "\n" << clst.size() << std::endl;
-	std::cout << "sps sizes: ";
+	//std::cout << "sps sizes: ";
         for ( auto const& iClst : clst ) {
           std::vector< art::Ptr<recob::Hit> > clstHits = fmhit.at( iClst.key() );
           if ( clstHits.size() == 0 ) {
             useClstIdx+=1;
-	    std::cout << "skipping a cluster." << std::endl;
+	    //std::cout << "skipping a cluster." << std::endl;
             continue;
           }
 	  // BH 11 Jan 2021: try to grab just the "lowest" hit instead of this sort... but... there are repeated hits?!?!
@@ -765,7 +765,7 @@ void GaussHitRecovery::produce(art::Event& e)
 	  thisPcaClusterPoint[ clstHits[lowestHit]->WireID().asPlaneID() ] = hitPoint;
         }
 
-        // if no clusters have hits, skip this pfp/pca...
+        // if no clusters have hits, skip this pfp/pcaxis...
         if ( useClstIdx==clst.size() ) continue;
 	// if hasFoundHit not set to true then skip this...
 	if ( !hasFoundHit ) continue;
@@ -776,7 +776,7 @@ void GaussHitRecovery::produce(art::Event& e)
 	std::vector< art::Ptr<recob::SpacePoint> > useSps = fmsps.at( useThisHit.key() );
         // TODO: For now return all the spacepoints and see if any align when comparing potential "matches"
         //std::cout << "useSps.size() = " << useSps.size() << std::endl;
-	std::cout << useSps.size() << " ";
+	//std::cout << useSps.size() << " ";
         if ( useSps.size()==0 ) continue;
         pcaSpacePoint.push_back( useSps );
 
@@ -787,7 +787,7 @@ void GaussHitRecovery::produce(art::Event& e)
 
         pcaMagnitudes.push_back( (float)ax1val[2] );
       }
-      std::cout << "... end pfps." << std::endl;
+      //std::cout << "... end pfps." << std::endl;
 
       // Look at the PCAs:
       // The objects pcaClusterPoint, pcaVectors, pcaMagnitudes should all line up in terms of entries, so can be matched
@@ -998,15 +998,15 @@ void GaussHitRecovery::produce(art::Event& e)
           } // end loop of point-pairs we're testing the hit against
 	  if ( thisPlaneID.Cryostat == 0 && thisPlaneID.TPC == 0 &&
 	       thisPlaneID.Plane == 1 && thisTime > 2500 && thisTime < 3000 && thisWire > 2410 && thisWire < 2490 ) {
-	    std::cout << "Hit being checked at w=" << thisWire << " t=" << thisTime << ", min #RMSs=" << bhCheckMinRMSs
-		      << " for match (" << bhCheckMinRMSloW << "," << bhCheckMinRMSloT << ")-(" << bhCheckMinRMShiW << "," << bhCheckMinRMShiT << ")"
-		      << " a vec (" << bhCheckMinRMSPCA_X << ", " << bhCheckMinRMSPCA_Y << ", " << bhCheckMinRMSPCA_Z << ")..."
-		      << " Recovered: " << (bhCheckRecoveredPCA ? "Yes" : "No") << std::endl;
-	    std::cout << "  checked: ";
-	    for ( auto const& lookedPair : allLookedAtPointsW ) {
-	      std::cout << "(" << lookedPair.first << ", " << lookedPair.second << ") ";
-	    }
-	    std::cout << std::endl;
+	    //std::cout << "Hit being checked at w=" << thisWire << " t=" << thisTime << ", min #RMSs=" << bhCheckMinRMSs
+	    //	      << " for match (" << bhCheckMinRMSloW << "," << bhCheckMinRMSloT << ")-(" << bhCheckMinRMShiW << "," << bhCheckMinRMShiT << ")"
+	    //	      << " a vec (" << bhCheckMinRMSPCA_X << ", " << bhCheckMinRMSPCA_Y << ", " << bhCheckMinRMSPCA_Z << ")..."
+	    //	      << " Recovered: " << (bhCheckRecoveredPCA ? "Yes" : "No") << std::endl;
+	    //std::cout << "  checked: ";
+	    //for ( auto const& lookedPair : allLookedAtPointsW ) {
+	    //  std::cout << "(" << lookedPair.first << ", " << lookedPair.second << ") ";
+	    //}
+	    //std::cout << std::endl;
 	  }
         } // end loop of wires for the hit
       } // end loop all hits
@@ -1260,14 +1260,14 @@ void GaussHitRecovery::produce(art::Event& e)
               }
 
 	    // Print out the hits being recovered in test event's region of interest
-	    if ( thisPlaneID.Cryostat == 0 && thisPlaneID.TPC == 0 &&
-		 thisPlaneID.Plane == 1 && thisTime > 2500 && thisTime < 3000 && thisWire > 2410 && thisWire < 2490 ) {
-	      std::cout << "Hit being checked at w=" << thisWire << " t=" << thisTime << ","
-			<< " Recovered at dist " << minDist
-			<< " cm by match to vec (" << std::get<0>(iPCA).X() << ", " << std::get<0>(iPCA).Y() << ", " << std::get<0>(iPCA).Z() << ")," 
-			<< " Incuding spacepoint (" << std::get<1>(iPCA).X() << ", " << std::get<1>(iPCA).Y() << ", " << std::get<1>(iPCA).Z() << "),"
-			<< " With scdy radius = " << std::get<2>(iPCA) << " (override = " << fOverrideScdyRadii << ")." << std::endl;
-	    }
+	    //if ( thisPlaneID.Cryostat == 0 && thisPlaneID.TPC == 0 &&
+	    //	 thisPlaneID.Plane == 1 && thisTime > 2500 && thisTime < 3000 && thisWire > 2410 && thisWire < 2490 ) {
+	    //  std::cout << "Hit being checked at w=" << thisWire << " t=" << thisTime << ","
+	    //		<< " Recovered at dist " << minDist
+	    //		<< " cm by match to vec (" << std::get<0>(iPCA).X() << ", " << std::get<0>(iPCA).Y() << ", " << std::get<0>(iPCA).Z() << ")," 
+	    //		<< " Incuding spacepoint (" << std::get<1>(iPCA).X() << ", " << std::get<1>(iPCA).Y() << ", " << std::get<1>(iPCA).Z() << "),"
+	    //		<< " With scdy radius = " << std::get<2>(iPCA) << " (override = " << fOverrideScdyRadii << ")." << std::endl;
+	    //}
 
 	    // Put the hit into the recovered hit vector if it's not already registered
 	    if ( hitToRecoveryMethodMap.find( std::make_pair(iWire,thisTime) ) == hitToRecoveryMethodMap.end() ) {
@@ -1306,7 +1306,7 @@ void GaussHitRecovery::produce(art::Event& e)
   //
   /////////////////////////////////////////////////////////////////////
 
-  std::cout << "(PRODUCE #3) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
+  //std::cout << "(PRODUCE #3) fPCAxisInterpTol = " << fPCAxisInterpTol << std::endl;
 
   for ( auto const& iHitStruct : hitsPossiblyRecovered ) {
     auto const& thisWireID = iHitStruct.stHit.WireID();
