@@ -399,7 +399,7 @@ void GaussHitRecovery::produce(art::Event& e)
 	  }
 
         }
-	std::cout << "------------------------" << std::endl;
+	std::cout << "----- b4: " << clusterHits.size() << " after: " << uniqueHits.size() << std::endl;
 
         for ( auto const& iPlaneID : fGeom->IteratePlaneIDs() ) {
           if ( tick_list.find(iPlaneID) == tick_list.end() ) continue;
@@ -761,8 +761,8 @@ void GaussHitRecovery::produce(art::Event& e)
 	    useThisHit = clstHits[lowestHit];
 	    hasFoundHit = true;
 	  }
-	  std::pair hitPoint = std::make_pair( clstHits[0]->WireID().Wire, clstHits[0]->PeakTime() );
-	  thisPcaClusterPoint[ clstHits[0]->WireID().asPlaneID() ] = hitPoint;
+	  std::pair hitPoint = std::make_pair( clstHits[lowestHit]->WireID().Wire, clstHits[lowestHit]->PeakTime() );
+	  thisPcaClusterPoint[ clstHits[lowestHit]->WireID().asPlaneID() ] = hitPoint;
         }
 
         // if no clusters have hits, skip this pfp/pca...
