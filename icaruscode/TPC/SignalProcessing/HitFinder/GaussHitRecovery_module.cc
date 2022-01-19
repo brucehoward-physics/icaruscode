@@ -907,14 +907,14 @@ void GaussHitRecovery::produce(art::Event& e)
 
         // Consider both wire possibilities for hits in the overlap regions
 	bool bhCheckRecoveredPCA = false;
-	float bhCheckMinRMSs = 99999.;
-	float bhCheckMinRMSloW = 0.;
-	float bhCheckMinRMShiW = 0.;
-	float bhCheckMinRMSloT = 0.;
-	float bhCheckMinRMShiT = 0.;
-	float bhCheckMinRMSPCA_X = 0.;
-	float bhCheckMinRMSPCA_Y = 0.;
-	float bhCheckMinRMSPCA_Z = 0.;
+	//float bhCheckMinRMSs = 99999.;
+	//float bhCheckMinRMSloW = 0.;
+	//float bhCheckMinRMShiW = 0.;
+	//float bhCheckMinRMSloT = 0.;
+	//float bhCheckMinRMShiT = 0.;
+	//float bhCheckMinRMSPCA_X = 0.;
+	//float bhCheckMinRMSPCA_Y = 0.;
+	//float bhCheckMinRMSPCA_Z = 0.;
 	std::vector< std::pair<float,float> > allLookedAtPointsW;
 	std::vector< std::pair<float,float> > allLookedAtPointsT;
 
@@ -954,17 +954,17 @@ void GaussHitRecovery::produce(art::Event& e)
             float tickExpect = (connectSlope * thisWire) + connectInt;
             //if ( std::fabs(tickExpect-thisTime) > fPCAxisInterpTol*thisRMS ) continue; --> ADDED THIS TO THE FOLLOWING CHECKS TO HELP HAVE MORE TO PRINT OUT
 
-	    if ( std::fabs(tickExpect-thisTime)/thisRMS < bhCheckMinRMSs ) {
-	      bhCheckMinRMSs = std::fabs(tickExpect-thisTime)/thisRMS;
-
-	      bhCheckMinRMSloW = loWire;
-	      bhCheckMinRMSloT = loWireTick;
-	      bhCheckMinRMShiW = hiWire;
-	      bhCheckMinRMShiT = hiWireTick;
-	      bhCheckMinRMSPCA_X = allPcaVectors[ thisPlaneID ].at(iPtPair).first.X();
-	      bhCheckMinRMSPCA_Y = allPcaVectors[ thisPlaneID ].at(iPtPair).first.Y();
-	      bhCheckMinRMSPCA_Z = allPcaVectors[ thisPlaneID ].at(iPtPair).first.Z();
-	    }
+	    //if ( std::fabs(tickExpect-thisTime)/thisRMS < bhCheckMinRMSs ) {
+	    //  bhCheckMinRMSs = std::fabs(tickExpect-thisTime)/thisRMS;
+	    //
+	    //  bhCheckMinRMSloW = loWire;
+	    //  bhCheckMinRMSloT = loWireTick;
+	    //  bhCheckMinRMShiW = hiWire;
+	    //  bhCheckMinRMShiT = hiWireTick;
+	    //  bhCheckMinRMSPCA_X = allPcaVectors[ thisPlaneID ].at(iPtPair).first.X();
+	    //  bhCheckMinRMSPCA_Y = allPcaVectors[ thisPlaneID ].at(iPtPair).first.Y();
+	    //  bhCheckMinRMSPCA_Z = allPcaVectors[ thisPlaneID ].at(iPtPair).first.Z();
+	    //}
 
             // Put the hit into the recovered hit vector if it's not already registered
             if ( std::fabs(tickExpect-thisTime) <= fPCAxisInterpTol*thisRMS &&
@@ -996,18 +996,18 @@ void GaussHitRecovery::produce(art::Event& e)
 	    //bhCheckRecoveredPCA = true;
             //break; ---> WHY THIS "LONELY" BREAK? Ah this was probably okay when we had the separate check on if it passed...
           } // end loop of point-pairs we're testing the hit against
-	  if ( thisPlaneID.Cryostat == 0 && thisPlaneID.TPC == 0 &&
-	       thisPlaneID.Plane == 1 && thisTime > 2500 && thisTime < 3000 && thisWire > 2410 && thisWire < 2490 ) {
-	    //std::cout << "Hit being checked at w=" << thisWire << " t=" << thisTime << ", min #RMSs=" << bhCheckMinRMSs
-	    //	      << " for match (" << bhCheckMinRMSloW << "," << bhCheckMinRMSloT << ")-(" << bhCheckMinRMShiW << "," << bhCheckMinRMShiT << ")"
-	    //	      << " a vec (" << bhCheckMinRMSPCA_X << ", " << bhCheckMinRMSPCA_Y << ", " << bhCheckMinRMSPCA_Z << ")..."
-	    //	      << " Recovered: " << (bhCheckRecoveredPCA ? "Yes" : "No") << std::endl;
-	    //std::cout << "  checked: ";
-	    //for ( auto const& lookedPair : allLookedAtPointsW ) {
-	    //  std::cout << "(" << lookedPair.first << ", " << lookedPair.second << ") ";
-	    //}
-	    //std::cout << std::endl;
-	  }
+	  //if ( thisPlaneID.Cryostat == 0 && thisPlaneID.TPC == 0 &&
+	  //     thisPlaneID.Plane == 1 && thisTime > 2500 && thisTime < 3000 && thisWire > 2410 && thisWire < 2490 ) {
+	  //  std::cout << "Hit being checked at w=" << thisWire << " t=" << thisTime << ", min #RMSs=" << bhCheckMinRMSs
+	  //	      << " for match (" << bhCheckMinRMSloW << "," << bhCheckMinRMSloT << ")-(" << bhCheckMinRMShiW << "," << bhCheckMinRMShiT << ")"
+	  //	      << " a vec (" << bhCheckMinRMSPCA_X << ", " << bhCheckMinRMSPCA_Y << ", " << bhCheckMinRMSPCA_Z << ")..."
+	  //	      << " Recovered: " << (bhCheckRecoveredPCA ? "Yes" : "No") << std::endl;
+	  //  std::cout << "  checked: ";
+	  //  for ( auto const& lookedPair : allLookedAtPointsW ) {
+	  //    std::cout << "(" << lookedPair.first << ", " << lookedPair.second << ") ";
+	  //  }
+	  //  std::cout << std::endl;
+	  //}
         } // end loop of wires for the hit
       } // end loop all hits
     } // end loop all hit labels
@@ -1200,7 +1200,7 @@ void GaussHitRecovery::produce(art::Event& e)
 
 	// If multiple wires for the hit then check both
 	for ( auto const& iWire : wires ) {
-	  auto const& thisWire = iWire.Wire;
+	  //auto const& thisWire = iWire.Wire;
 	  auto thisPlaneID = iWire.asPlaneID();
 	  auto thisTPCID   = iWire.asTPCID();
 
