@@ -29,8 +29,10 @@ art_make(
                         ${ART_FRAMEWORK_CORE}
                         ${ART_FRAMEWORK_PRINCIPAL}
                         ${ART_FRAMEWORK_SERVICES_REGISTRY}
+			${ART_ROOT_IO}
                         ${ART_ROOT_IO_TFILE_SUPPORT}
                         ${ART_ROOT_IO_TFILESERVICE_SERVICE}
+			${ART_FRAMEWORK_IO_PRODUCTMIX}
                         ${ART_UTILITIES}
                         art_Persistency_Common canvas
                         art_Persistency_Provenance canvas
