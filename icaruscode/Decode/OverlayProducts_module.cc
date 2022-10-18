@@ -95,6 +95,7 @@ private:
   art::InputTag fPMTWaveDataLabel;
   art::InputTag fPMTWaveBaseLabel;
   art::InputTag fPMTWaveSimLabel;
+  int fPMTWaveTestCh;
   std::vector< art::InputTag > fPMTHitInputLabels;
 
   // CRT
@@ -121,6 +122,7 @@ OverlayProducts::OverlayProducts(fhicl::ParameterSet const& p)
   fPMTWaveDataLabel   ( p.get< art::InputTag >("PMTWaveDataLabel", "") ),
   fPMTWaveBaseLabel   ( p.get< art::InputTag >("PMTWaveBaseLabel", "") ),
   fPMTWaveSimLabel    ( p.get< art::InputTag >("PMTWaveSimLabel", "") ),
+  fPMTWaveTestCh      ( p.get< int >("PMTWaveTestCh", -1) ),
   fPMTHitInputLabels  ( p.get< std::vector<art::InputTag> >("PMTHitInputLabels", {}) ),
   fCRTOverlayHits     ( p.get< bool >("CRTOverlayHits", false) ),
   fCRTHitInputLabels  ( p.get< std::vector<art::InputTag> >("CRTHitInputLabels", {}) )
@@ -404,7 +406,28 @@ void OverlayProducts::produce(art::Event& e)
       return;
     }
     // ... and the baselines
+    art::Handle< std::vector<icarus::WaveformBaseline> > baselinesHandle;
+    std::vector< art::Ptr<icarus::WaveformBaseline> > baselines;
+    if ( e.getByLabel(fPMTWaveBaseLabel,baselinesHandle) ) {
+      art::fill_ptr_vector(baselines,baselinesHandle);
+    }
+    else{
+      mf::LogWarning("OverlayProducts") << "Event failed to find raw::OpDetWaveform with label " << fPMTWaveBaseLabel << ".";
+      return;
+    }
     art::FindManyP<icarus::WaveformBaseline> fmbase( dataWavesHandle, e, fPMTWaveBaseLabel );
+    if( !fmbase.isValid() ) {
+      mf::LogError("OverlayProducts") << "Error in validity of fmbase. Returning.";
+      return;
+    }
+    // TEST!!!! PRINT BASELINES ////////////////
+    std::cout << "// ---- BASELINES ---- " << std::endl;
+    for ( unsigned int idxBase=0; idxBase<baselines.size(); ++idxBase ) {
+      std::cout << baselines[idxBase]->baseline() << " ";
+    }
+    std::cout << "---- BASELINES ---- //" << std::endl;
+    std::cout << std::endl;
+    ////////////////////////////////////////////
     // Now fill the map
     for ( auto const& dataWave : dataWaves ) {
       auto chID = dataWave->ChannelNumber();
@@ -417,11 +440,22 @@ void OverlayProducts::produce(art::Event& e)
 	opWaveformsMap[ chID ] = std::vector< opWaveformOverlay >();
 
       auto baselines = fmbase.at( dataWave.key() );
+      if ( baselines.size() > 1 ) std::cout << "SHOULD NOT BE MORE THAN ONE BASELINE..." << std::endl;
 
       opWaveformOverlay dataOpWave;
       dataOpWave.timestamp = time;
       dataOpWave.wvfm = wvfm;
       dataOpWave.baseline = ( baselines.size()>0 ? baselines[0]->baseline() : wvfm[0] ); // TODO: better way of guarding?
+
+      // Print
+      if ( int(chID)==fPMTWaveTestCh && wvfm.size()>10500 ) {
+	std::cout << "DATA WAVEFORM AT TIME " << std::setprecision(8) << time << ": [ ";
+	for ( unsigned int i=0; i<wvfm.size(); ++i ) {
+	  std::cout << wvfm[i];
+	  if ( i==wvfm.size()-1 ) std::cout<< " ]" << std::endl;
+	  else std::cout << ", ";
+	}
+      }
 
       opWaveformsMap[chID].push_back( dataOpWave );
     }
@@ -444,6 +478,16 @@ void OverlayProducts::produce(art::Event& e)
 
       if ( wvfm.size() == 0 ) continue;
 
+      // PRINT
+      if ( int(chID)==fPMTWaveTestCh && wvfm.size()>10500 ) {
+	std::cout << "SIM WAVEFORM AT TIME " << std::setprecision(8) << time << ": [ ";
+	for ( unsigned int i=0;i<wvfm.size(); ++i ) {
+	  std::cout << wvfm[i];
+          if ( i==wvfm.size()-1 ) std::cout<< " ]" << std::endl;
+          else std::cout << ", ";
+        }
+      }
+
       // if this channel isn't in the map, then let's make a new struct to start the map
       if ( opWaveformsMap.find( chID ) == opWaveformsMap.end() ) {
 	opWaveformOverlay simOpWave;
@@ -455,6 +499,9 @@ void OverlayProducts::produce(art::Event& e)
       // ... else let's look for overlaps
       else {
 	std::vector< unsigned int > overlaps;
+	if ( int(chID)==fPMTWaveTestCh && wvfm.size()>10500 ) {
+	  std::cout << "Overlap idx vals: [ ";
+	}
 	for ( unsigned int idxWave=0; idxWave<opWaveformsMap[ chID ].size(); ++idxWave ) {
 	  const opWaveformOverlay thisWaveformOverlay = opWaveformsMap[ chID ].at(idxWave);
 	  double simEnd = time + wvfm.size()*thisWaveformOverlay.deltaT;
@@ -463,7 +510,24 @@ void OverlayProducts::produce(art::Event& e)
 	       ( time < thisWaveformOverlay.endTime() && simEnd > thisWaveformOverlay.endTime() ) ) {
 	    overlaps.push_back( idxWave );
 	  }
+
+	  if ( int(chID)==fPMTWaveTestCh && wvfm.size()>10500 ) {
+	    std::cout << thisWaveformOverlay.timestamp << "-to-" << thisWaveformOverlay.endTime() << " ";
+	  }
 	} // iterate saved waveforms looking for overlap
+	if ( int(chID)==fPMTWaveTestCh && wvfm.size()>10500 ) {
+	  std::cout << " ]" << std::endl;
+	}
+
+	if ( int(chID)==fPMTWaveTestCh && wvfm.size()>10500 ) {
+	  std::cout << std::endl;
+	  std::cout << "OVERLAPS = " << overlaps.size() << std::endl;
+	  std::cout << "  [ ";
+	  for ( auto const& i : overlaps ) std::cout << i << " ";
+	  std::cout << "]" << std::endl;
+	  std::cout << std::endl;
+	}
+
 	// Case 1: No overlaps. Make a new entry in the map as above...
 	if ( overlaps.size() == 0 ) {
 	  opWaveformOverlay simOpWave;
@@ -478,7 +542,7 @@ void OverlayProducts::produce(art::Event& e)
 	  // TODO: better way?
 	  std::map< raw::TimeStamp_t, unsigned int > timestampIdxMap;
 	  for ( unsigned int idxOverlap=0; idxOverlap<overlaps.size(); ++idxOverlap ) {
-	    timestampIdxMap[ opWaveformsMap[ chID ].at(idxOverlap).timestamp ] = overlaps[idxOverlap];
+	    timestampIdxMap[ opWaveformsMap[ chID ].at( overlaps[idxOverlap] ).timestamp ] = overlaps[idxOverlap];
 	  }
 	  std::vector< raw::TimeStamp_t > orderedTimes;
 	  std::vector< unsigned int > orderedOverlaps;
@@ -486,6 +550,17 @@ void OverlayProducts::produce(art::Event& e)
 	    orderedTimes.push_back(time);
 	    orderedOverlaps.push_back(idx);
 	  }
+
+	  if ( int(chID)==fPMTWaveTestCh && wvfm.size()>10500 ) {
+	    std::cout << "Sim Time: " << time << std::endl;
+	    std::cout << "Times: [ ";
+	    for ( unsigned int i=0; i<orderedTimes.size(); ++i ) {
+	      std::cout << orderedTimes[i];
+	      if ( i == orderedTimes.size()-1 ) std::cout << " ]" << std::endl;
+	      else std::cout << ", ";
+	    }
+	  }
+
 	  // New struct
 	  opWaveformOverlay overlayOpWave;
 	  overlayOpWave.timestamp = std::min( time, orderedTimes[0] );
@@ -495,15 +570,23 @@ void OverlayProducts::produce(art::Event& e)
 
 	  unsigned int idxWvfmEntry=0;
 	  double loTime=std::numeric_limits<double>::lowest();
-
 	  for ( unsigned int iOverlap=0; iOverlap<orderedOverlaps.size(); ++iOverlap ) {
+	    // If time < first overlay candidate, start adding before
 	    while ( idxWvfmEntry<wvfm.size() && time+((double(idxWvfmEntry)+0.5)*deltaT) > loTime && time+((double(idxWvfmEntry)+0.5)*deltaT) < orderedTimes[iOverlap] ) {
 	      adcVec.push_back( overlayOpWave.baseline + (wvfm[idxWvfmEntry] - simBaseline) );
 	      idxWvfmEntry+=1;
 	    }
 
 	    opWaveformOverlay thisOverlap = opWaveformsMap[ chID ].at( orderedOverlaps[iOverlap] );
-	    for ( unsigned int idxInOverlap=0; idxInOverlap<thisOverlap.wvfm.size(); ++idxInOverlap ) {
+
+	    // If after, then start putting in entries before the overlapping time
+	    unsigned int alreadyInOverlap = 0;
+	    while ( idxWvfmEntry<wvfm.size() && orderedTimes[iOverlap]+((double(adcVec.size())+0.5)*deltaT) < time ) {
+	      adcVec.push_back( thisOverlap.wvfm[ adcVec.size() ] );
+	      alreadyInOverlap+=1;
+	    }
+
+	    for ( unsigned int idxInOverlap=alreadyInOverlap; idxInOverlap<thisOverlap.wvfm.size(); ++idxInOverlap ) {
 	      raw::ADC_Count_t addTo = ( idxWvfmEntry < wvfm.size() ? (wvfm[idxWvfmEntry] - simBaseline) : 0 );
 	      adcVec.push_back( thisOverlap.wvfm[idxInOverlap] + addTo );
 	      idxWvfmEntry+=1;
@@ -512,9 +595,24 @@ void OverlayProducts::produce(art::Event& e)
 	    loTime = thisOverlap.endTime();
 	  } // loop overlaps
 
+	  // and fill in any remaining bins left
+	  while ( idxWvfmEntry < wvfm.size() ) {
+	    adcVec.push_back( overlayOpWave.baseline + (wvfm[idxWvfmEntry] - simBaseline) );
+	    idxWvfmEntry+=1;
+	  }
+
 	  // Now delete the overlapping waveforms
-	  for ( unsigned int iOverlap=0; iOverlap<orderedOverlaps.size(); ++iOverlap ) {
-	    unsigned int positionToErase = overlaps[ overlaps.size()-1-iOverlap ] - 1;
+	  for ( unsigned int iOverlap=0; iOverlap<overlaps.size(); ++iOverlap ) {
+	    unsigned int positionToErase = overlaps[ overlaps.size()-1-iOverlap ];
+
+	    if ( int(chID)==fPMTWaveTestCh && wvfm.size()>10500 ) {
+	      std::cout << "... We should now erase entry " << positionToErase << " which is STRUCT WITH:" << std::endl;
+	      std::cout << "    time:     " << opWaveformsMap[ chID ].at( positionToErase+1 ).timestamp << std::endl;
+	      std::cout << "    baseline: " << opWaveformsMap[ chID ].at( positionToErase+1 ).baseline << std::endl;
+	      std::cout << "    wv size:  " << opWaveformsMap[ chID ].at( positionToErase+1 ).wvfm.size() << std::endl;
+	      std::cout << "    end time: " << opWaveformsMap[ chID ].at( positionToErase+1 ).endTime() << std::endl;
+	    }
+
 	    opWaveformsMap[ chID ].erase( opWaveformsMap[ chID ].begin()+positionToErase );
 	  }
 
@@ -534,6 +632,24 @@ void OverlayProducts::produce(art::Event& e)
 	const raw::Channel_t chan = chID;
 	std::vector< raw::ADC_Count_t > vals = wvfmStruct.wvfm;
 	const icarus::WaveformBaseline::Baseline_t base =  wvfmStruct.baseline;
+
+	// Print
+	if ( int(chID)==fPMTWaveTestCh ) {
+	  std::cout << "Saving STRUCT WITH: " << std::endl;
+	  std::cout << "    time:     " << wvfmStruct.timestamp << std::endl;
+	  std::cout << "    baseline: " << wvfmStruct.baseline << std::endl;
+	  std::cout << "    wv size:  " << wvfmStruct.wvfm.size() << std::endl;
+	  std::cout << "    end time: " << wvfmStruct.endTime() << std::endl;
+	}
+
+	if ( int(chID)==fPMTWaveTestCh && vals.size()>10500 ) {
+	  std::cout << "OVERLAID WAVEFORM AT TIME " << std::setprecision(8) << time << ": [ ";
+	  for ( unsigned int i=0;i<vals.size(); ++i ) {
+	    std::cout << vals[i];
+	    if ( i==vals.size()-1 ) std::cout<< " ]" << std::endl;
+	    else std::cout << ", ";
+	  }
+	}
 
 	// TODO: why does constructor require unsigned short but then use type short???
 	std::vector<uint16_t> valsUnsigned;
