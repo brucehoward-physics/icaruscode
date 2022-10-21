@@ -1,3 +1,5 @@
+cet_find_library(LIBWDA NAMES wda PATHS ENV LIBWDA_LIB NO_DEFAULT_PATH)
+
 add_subdirectory(Algorithms)
 
 # Build the module
@@ -21,6 +23,27 @@ art_make( MODULE_LIBRARIES
            ROOT::Hist
            ROOT::Physics
            ${MF_MESSAGELOGGER}
+	TOOL_LIBRARIES
+           larevt_CalibrationDBI_Providers
+           larcorealg_Geometry
+           larreco_Calorimetry
+           lardataobj_RecoBase
+           lardata_ArtDataHelper
+           lardataalg_DetectorInfo
+           larcorealg_Geometry
+           lardataobj_AnalysisBase
+           ${ART_FRAMEWORK_SERVICES_REGISTRY}
+           ${ART_UTILITIES}
+           canvas
+           ${FHICLCPP}
+           cetlib_except
+           ROOT::Core
+           ROOT::Physics
+           ROOT::Core
+           ROOT::Hist
+           ROOT::Physics
+           ${MF_MESSAGELOGGER}
+           LIBWDA
          )
 
 install_headers()
