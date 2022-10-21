@@ -118,6 +118,9 @@ double icarus::calo::NormalizeDriftSQLite::Normalize(double dQdx, const art::Eve
   if (cryo == 1 && (tpc == 0 || tpc == 1)) thiselifetime = runelifetime.tau_WE;
   // WW
   if (cryo == 1 && (tpc == 2 || tpc == 3)) thiselifetime = runelifetime.tau_WW;
+
+  // BH HACK FOR NUE CANDIDATE EVENT
+  thiselifetime = 3333.33; // ns
   
   // Get the hit time
   double thit = clock_data.TPCTick2TrigTime(hit.PeakTime()) - t0;

@@ -49,3 +49,7 @@ art_make( MODULE_LIBRARIES
 install_headers()
 install_fhicl()
 install_source()
+
+# get .db files into FW_SEARCH_PATH hopefully
+file(GLOB calonormdb_file *.db)
+install_fw(LIST ${calonormdb_file})
