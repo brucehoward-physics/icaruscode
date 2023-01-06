@@ -16,7 +16,6 @@
 #include "larcorealg/Geometry/GeometryCore.h"
 #include "larcorealg/Geometry/AuxDetGeometryCore.h"
 #include "larcoreobj/SimpleTypesAndConstants/geo_types.h"
-//#include "icaruscode/Decode/DataProducts/ExtraTriggerInfo.h"
 #include "sbnobj/Common/Trigger/ExtraTriggerInfo.h"
 //#include "icaruscode/CRT/CRTUtils/CRTHitRecoAlg.h"
 
@@ -181,7 +180,8 @@ namespace crt {
     uint64_t m_gate_start_timestamp;
     uint64_t m_trigger_gate_diff;
     uint64_t m_gate_crt_diff;
-
+    uint64_t m_crt_global_trigger;
+    Long64_t m_crtGT_trig_diff;
     //CRT data product vars
     //static const int kDetMax = 64;
     int      fDetEvent;
@@ -210,7 +210,7 @@ namespace crt {
     float    fYErrHit; ///< stat error of CRT hit reco Y (cm)
     float    fZErrHit; ///< stat error of CRT hit reco Z (cm)
     uint64_t    fT0Hit; ///< hit time w.r.t. PPS
-    uint64_t    fT1Hit; ///< hit time w.r.t. global event time
+    Long64_t    fT1Hit; ///< hit time w.r.t. global trigger
     int       fHitReg; ///< region code of CRT hit
     int       fHitSubSys;
     int       fNHit; ///< number of CRT hits for this event
@@ -333,7 +333,7 @@ namespace crt {
     fHitNtuple->Branch("yErr",        &fYErrHit,     "yErr/F");
     fHitNtuple->Branch("zErr",        &fZErrHit,     "zErr/F");
     fHitNtuple->Branch("t0",          &fT0Hit,       "t0/l");
-    fHitNtuple->Branch("t1",          &fT1Hit,       "t1/l");
+    fHitNtuple->Branch("t1",          &fT1Hit,       "t1/L");
     fHitNtuple->Branch("region",      &fHitReg,      "region/I");  
     //    fHitNtuple->Branch("tagger",      &ftagger,      "tagger/C");  
     fHitNtuple->Branch("subSys",      &fHitSubSys,   "subSys/I");
@@ -347,6 +347,8 @@ namespace crt {
     fHitNtuple->Branch("gate_start_timestamp", &m_gate_start_timestamp, "gate_start_timestamp/l");
     fHitNtuple->Branch("trigger_gate_diff", &m_trigger_gate_diff, "trigger_gate_diff/l");
     fHitNtuple->Branch("gate_crt_diff",&m_gate_crt_diff, "gate_crt_diff/l");
+    fHitNtuple->Branch("crt_global_trigger",&m_crt_global_trigger,"crt_global_trigger/l");
+    fHitNtuple->Branch("crtGT_trig_diff",&m_crtGT_trig_diff,"crtGT_trig_diff/L");
 }
    
   void CRTDataAnalysis::beginRun(const art::Run&)
@@ -413,7 +415,14 @@ namespace crt {
 	for(int chan=0; chan<32; chan++) {
 	  std::pair<double,double> const chg_cal = fChannelMap->getSideCRTCalibrationMap((int)crtList[febdat_i]->fMac5,chan);
 	  float pe = (crtList[febdat_i]->fAdc[chan]-chg_cal.second)/chg_cal.first;
-	  if(pe<=fPEThresh) continue;
+	  // In order to have Reset TS1 hits in CRTData from Side CRT, we have to explicitly include them
+	  // The current threshold cut (6.5 PE) was applied to filter out noise, but this also filters out
+	  // Reset events which are random trigger around the pedestal. These Reset hits are removed in 
+	  // CRT Hit reconstruction. Top CRT has in internal triggering logic and threshold  that screens
+	  // from the noise (hence presel = true for all the hits).
+	  // Please revise this in the future if also T0 Reset hits need to be kept in CRTData. 
+	  // To do so, include !0crtList[febdat_i]->IsReference_TS0()
+	  if(pe<=fPEThresh && !crtList[febdat_i]->IsReference_TS1()) continue;
 	  presel = true;
 	}
       }else if ( type == 'c' ) {
@@ -503,9 +512,9 @@ namespace crt {
 	  fHitReg  = fCrtutils->AuxDetRegionNameToNum(fCrtutils->MacToRegion(mactmp));
 	  fHitSubSys =  fCrtutils->MacToTypeCode(mactmp);
 	  
-	  
 	  m_gate_crt_diff = m_gate_start_timestamp - hit.ts0_ns;
-	  
+	  m_crt_global_trigger = hit.ts0_ns - hit.ts1_ns;
+	  m_crtGT_trig_diff = m_crt_global_trigger - (m_trigger_timestamp%1'000'000'000);
 	  auto ittmp = hit.pesmap.find(mactmp);
 	  if (ittmp==hit.pesmap.end()) {
 	     mf::LogError("CRTDataAnalysis") << "hitreg: " << fHitReg << std::endl;
@@ -513,8 +522,7 @@ namespace crt {
 	     mf::LogError("CRTDataAnalysis") << "mactmp = " << mactmp << std::endl;
 	     mf::LogError("CRTDataAnalysis") << "could not find mac in pesmap!" << std::endl;
 	    continue;
-	  }
-	  
+	  }	  
 	  int chantmp = (*ittmp).second[0].first;
 	  
 	  fHitMod  = fCrtutils->MacToAuxDetID(mactmp, chantmp);
