@@ -83,6 +83,7 @@ private:
   bool fTPCOverlayRaw;   //< Set true if you should overlay at the RawDigit stage
   bool fTPCOverlayROI;   //< Set true if you should overlay at the recob::ChannelROI stage
   bool fTPCOverlayHits;  //< Set true if you should overlay at the recob::Hit stage
+  bool fTPCHitsWireAssn; //< Set true if you want to make the hit<->wire association in HitCollectionCreator
   std::vector< art::InputTag > fTPCRawInputLabels;
   art::InputTag                fTPCRawOutputLabel;
   std::vector< art::InputTag > fTPCROIInputLabels;
@@ -112,6 +113,7 @@ OverlayProducts::OverlayProducts(fhicl::ParameterSet const& p)
   fTPCOverlayRaw      ( p.get< bool >("TPCOverlayRaw", false) ),
   fTPCOverlayROI      ( p.get< bool >("TPCOverlayROI", false) ),
   fTPCOverlayHits     ( p.get< bool >("TPCOverlayHits", false) ),
+  fTPCHitsWireAssn    ( p.get< bool >("TPCHitsWireAssn", true) ),
   fTPCRawInputLabels  ( p.get< std::vector<art::InputTag> >("TPCRawInputLabels", {}) ),
   fTPCRawOutputLabel  ( p.get< art::InputTag >("TPCRawOutputLabel","") ),
   fTPCROIInputLabels  ( p.get< std::vector<art::InputTag> >("TPCROIInputLabels", {}) ),
@@ -148,7 +150,7 @@ OverlayProducts::OverlayProducts(fhicl::ParameterSet const& p)
   if ( fTPCOverlayRaw ) produces< std::vector<raw::RawDigit> >(fTPCRawOutputLabel.instance());
   if ( fTPCOverlayROI ) produces< std::vector<recob::ChannelROI> >();
   // basically from the GausHitFinder
-  if ( fTPCOverlayHits ) recob::HitCollectionCreator::declare_products(producesCollector(), fTPCHitCreatorInstanceName, true, false);
+  if ( fTPCOverlayHits ) recob::HitCollectionCreator::declare_products(producesCollector(), fTPCHitCreatorInstanceName, fTPCHitsWireAssn, false);
 
   if ( fPMTOverlayRaw ) {
     produces< std::vector<raw::OpDetWaveform> >();
@@ -347,12 +349,7 @@ void OverlayProducts::produce(art::Event& e)
   if ( fTPCOverlayHits )
   {
     // As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc)
-    recob::HitCollectionCreator hitCol(e, fTPCHitCreatorInstanceName, true, false);
-    // Also as in GausHitFinder
-    struct hitstruct {
-      recob::Hit stHit;
-      art::Ptr<recob::Wire> stWire;
-    };
+    recob::HitCollectionCreator hitCol(e, fTPCHitCreatorInstanceName, fTPCHitsWireAssn, false);
 
     // Loop through hit labels and put together the hit set
     for ( auto const& iLabel : fTPCHitInputLabels ) {
@@ -367,18 +364,21 @@ void OverlayProducts::produce(art::Event& e)
       }
 
       art::FindManyP<recob::Wire> fmwire(hitsHandle, e, iLabel);
-      if( !fmwire.isValid() ){
+      if( !fmwire.isValid() && fTPCHitsWireAssn ){
 	mf::LogError("OverlayProducts") << "Error in validity of fmwire. Returning.";
 	return;
       }
 
       for ( auto const& iHitPtr : hits ) {
 	recob::Hit theHit = *iHitPtr;
-	// And get the associated wire
-	std::vector< art::Ptr<recob::Wire> > hitWires = fmwire.at(iHitPtr.key());
-	if ( hitWires.size() == 0 ) throw cet::exception("OverlayProducts") << "Hit found with no associated wires...\n";
-	else if ( hitWires.size() > 1 ) mf::LogWarning("OverlayProducts") << "Hit with >1 recob::Wire associated...";
-	hitCol.emplace_back(theHit,hitWires[0]);
+	// And get the associated wire -- if we should
+	if ( fTPCHitsWireAssn ) {
+	  std::vector< art::Ptr<recob::Wire> > hitWires = fmwire.at(iHitPtr.key());
+	  if ( hitWires.size() == 0 ) throw cet::exception("OverlayProducts") << "Hit found with no associated wires...\n";
+	  else if ( hitWires.size() > 1 ) mf::LogWarning("OverlayProducts") << "Hit with >1 recob::Wire associated...";
+	  hitCol.emplace_back(theHit,hitWires[0]);
+	}
+	else hitCol.emplace_back(theHit);
       }
     }
 

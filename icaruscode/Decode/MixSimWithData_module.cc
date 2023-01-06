@@ -65,23 +65,26 @@ namespace mix {
 
   MixSimWithData::MixSimWithData ( fhicl::ParameterSet const &p,
 				   art::MixHelper &helper ):
-    fRawDigitProducerLabel ( p.get< art::InputTag >("RawDigitProducerLabel","") ),
-    fHitProducerLabel      ( p.get< art::InputTag >("HitProducerLabel","") ),
+    fRawDigitProducerLabel      ( p.get< art::InputTag >("RawDigitProducerLabel","") ),
+    fHitProducerLabel           ( p.get< art::InputTag >("HitProducerLabel","") ),
     fOpDetWaveformProducerLabel ( p.get< art::InputTag >("OpDetWaveformProducerLabel","") ),
-    fMixRawDigits          ( p.get< bool >("MixRawDigits",false) ),
-    fMixHits               ( p.get< bool >("MixHits",false) ),
-    fMixOpDetWaveforms     ( p.get< bool >("MixOpDetWaveforms",false) )
+    fMixRawDigits               ( p.get< bool >("MixRawDigits",false) ),
+    fMixHits                    ( p.get< bool >("MixHits",false) ),
+    fMixOpDetWaveforms          ( p.get< bool >("MixOpDetWaveforms",false) )
   {
     if ( !fMixRawDigits && !fMixHits && !fMixOpDetWaveforms )
       throw cet::exception("MixSimWithData") << "Error... need to be doing SOME mixing." << std::endl;
 
     // Registering mix-ops (same order as declared -- following the NOvA style)
-    if ( fMixRawDigits )
+    if ( fMixRawDigits ) {
       helper.declareMixOp ( fRawDigitProducerLabel, &MixSimWithData::mixRawDigit, *this );
-    if ( fMixHits )
+    }
+    if ( fMixHits ) {
       helper.declareMixOp ( fHitProducerLabel, &MixSimWithData::mixHit, *this );
-    if ( fMixOpDetWaveforms )
+    }
+    if ( fMixOpDetWaveforms ) {
       helper.declareMixOp ( fOpDetWaveformProducerLabel, &MixSimWithData::mixOpDetWaveform, *this );
+    }
   }
 
   size_t MixSimWithData::nSecondaries()
