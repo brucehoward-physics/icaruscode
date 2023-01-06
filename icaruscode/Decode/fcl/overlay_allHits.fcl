@@ -1,0 +1,136 @@
+###
+## This fhicl file is used to run "stage0" processing specifically for the case where all
+## TPC data is included in an artdaq data product from a single instance
+##
+#include "stage0_icarus_mc_defs.fcl"
+#include "stage0_icarus_driver_common.fcl"
+
+process_name: Overlay
+
+## Add the MC module to the list of producers
+physics.producers: {  @table::icarus_stage0_producers
+                      @table::icarus_stage0_mc_producers
+		      overlayTPCHitEE:
+		      {
+		        module_type: "OverlayProducts"
+			TPCOverlayRaw: false
+			TPCOverlayHits: true
+			TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits: false
+                        CRTOverlayHits: false
+			TPCHitInputLabels: ["gaushitTPCEE::stage0", "gaushitTPCEE::MCOverlayStage0"]
+		      }
+		      overlayTPCHitEW:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: true
+			TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits:	false
+                        CRTOverlayHits: false
+                        TPCHitInputLabels: ["gaushitTPCEW::stage0", "gaushitTPCEW::MCOverlayStage0"]
+                      }
+		      overlayTPCHitWE:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: true
+			TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits:	false
+                        CRTOverlayHits: false
+                        TPCHitInputLabels: ["gaushitTPCWE::stage0", "gaushitTPCWE::MCOverlayStage0"]
+                      }
+		      overlayTPCHitWW:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: true
+			TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits:	false
+                        CRTOverlayHits: false
+                        TPCHitInputLabels: ["gaushitTPCWW::stage0", "gaushitTPCWW::MCOverlayStage0"]
+                      }
+		      overlayPMTHit:
+		      {
+		        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: false
+                        TPCOverlayROI: false
+			PMTOverlayRaw: false
+			PMTOverlayHits: true
+			CRTOverlayHits: false
+                        PMTHitInputLabels: ["ophit::stage0", "ophit::MCOverlayStage0"]
+		      }
+		      overlayCRTHit:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: false
+                        TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits: false
+                        CRTOverlayHits: true
+                        CRTHitInputLabels: ["crthit::stage0", "crthit::MCOverlayStage0"]
+                      }
+                   }
+
+## Use the following to run the full defined stage0 set of modules
+physics.reco: [ overlayTPCHitWW, overlayTPCHitWE, overlayTPCHitEW, overlayTPCHitEE, overlayPMTHit, overlayCRTHit ]
+
+## boiler plate...
+physics.outana:        [ ]
+physics.trigger_paths: [ reco ]
+physics.end_paths:     [ outana, streamBNB ]
+
+## Note that for output we hijack the "outBNB" definition (but change the naming convention to make more generic for MC)
+outputs.outBNB.fileName: "%ifb_%tc-%p.root"
+outputs.outBNB.dataTier: "reconstructed"
+
+# Drop the artdaq format files on output
+outputs.outBNB.outputCommands: ["keep *_*_*_*"]
+
+### BH: CHANGING WHILE INVESTIGATING OVERLAYS... , "drop *_MCDecodeTPCROI_*_*", "drop *_decon1droi_*_*", "drop raw::RawDigits_*_*_*" ]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# Set the expected input for ophit
+physics.producers.ophit.InputModule: "opdaq"
+
+# Set up for the single module mutliple TPC mode...
+physics.producers.MCDecodeTPCROI.FragmentsLabelVec:   ["daq3:PHYSCRATEDATATPCWW","daq2:PHYSCRATEDATATPCWE","daq1:PHYSCRATEDATATPCEW","daq0:PHYSCRATEDATATPCEE"]
+physics.producers.MCDecodeTPCROI.OutInstanceLabelVec: ["PHYSCRATEDATATPCWW",     "PHYSCRATEDATATPCWE",     "PHYSCRATEDATATPCEW",     "PHYSCRATEDATATPCEE"]
+physics.producers.decon1droi.RawDigitLabelVec:        ["MCDecodeTPCROI:PHYSCRATEDATATPCWW","MCDecodeTPCROI:PHYSCRATEDATATPCWE","MCDecodeTPCROI:PHYSCRATEDATATPCEW","MCDecodeTPCROI:PHYSCRATEDATATPCEE"]
+
+#### UPDATED BELOW: physics.producers.roifinder.WireModuleLabelVec: ["decon1droi:PHYSCRATEDATATPCWW","decon1droi:PHYSCRATEDATATPCWE","decon1droi:PHYSCRATEDATATPCEW","decon1droi:PHYSCRATEDATATPCEE"]
+
+## Need overrides for the purity monitor
+physics.producers.purityana0.RawModuleLabel:  ["MCDecodeTPCROI:PHYSCRATEDATATPCWW","MCDecodeTPCROI:PHYSCRATEDATATPCWE","MCDecodeTPCROI:PHYSCRATEDATATPCEW","MCDecodeTPCROI:PHYSCRATEDATATPCEE"]
+physics.producers.purityana1.RawModuleLabel:  ["MCDecodeTPCROI:PHYSCRATEDATATPCWW","MCDecodeTPCROI:PHYSCRATEDATATPCWE","MCDecodeTPCROI:PHYSCRATEDATATPCEW","MCDecodeTPCROI:PHYSCRATEDATATPCEE"]
+
+## BH: updated labels for overlays
+physics.producers.opflashCryoE.OpHitProducer: "ophit::MCOverlayStage0"
+physics.producers.opflashCryoW.OpHitProducer: "ophit::MCOverlayStage0"
+
+physics.producers.roifinder.WireModuleLabelVec: ["decon1droi:PHYSCRATEDATATPCWW:MCOverlayStage0","decon1droi:PHYSCRATEDATATPCWE:MCOverlayStage0","decon1droi:PHYSCRATEDATATPCEW:MCOverlayStage0","decon1droi:PHYSCRATEDATATPCEE:MCOverlayStage0"]
+
+physics.producers.gaushitTPCEE.CalDataModuleLabel: "roifinder:PHYSCRATEDATATPCEE:MCOverlayStage0"
+physics.producers.gaushitTPCEW.CalDataModuleLabel: "roifinder:PHYSCRATEDATATPCEW:MCOverlayStage0"
+physics.producers.gaushitTPCWE.CalDataModuleLabel: "roifinder:PHYSCRATEDATATPCWE:MCOverlayStage0"
+physics.producers.gaushitTPCWW.CalDataModuleLabel: "roifinder:PHYSCRATEDATATPCWW:MCOverlayStage0"
+
+physics.producers.crttrack.DataLabelHits: "crthit:MCOverlayStage0"
