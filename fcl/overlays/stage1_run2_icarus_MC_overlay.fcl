@@ -1,0 +1,114 @@
+#include "mchitmodules.fcl"
+#include "mcreco.fcl"
+#include "mctrutht0matching.fcl"
+#include "backtrackerservice.fcl"
+#include "particleinventoryservice.fcl"
+#include "icarus_flashfinder.fcl"
+
+#include "stage1_icarus_driver_common.fcl"
+
+process_name: MCstage1
+
+## Add the MC module to the list of producers
+physics.producers: {
+            @table::icarus_stage1_producers
+
+	    # Adding OpFlashes
+	    opflashCryoE:                   @local::ICARUSSimpleFlashDataCryoE
+	    opflashCryoW:                   @local::ICARUSSimpleFlashDataCryoW
+
+            mcophit:                        @local::ICARUSMCOpHit
+            mcopflashTPC0:                  @local::ICARUSMCOpFlashTPC0
+            mcopflashTPC1:                  @local::ICARUSMCOpFlashTPC1
+            mcopflashTPC2:                  @local::ICARUSMCOpFlashTPC2
+            mcopflashTPC3:                  @local::ICARUSMCOpFlashTPC3
+          
+            cheatopflashTPC0:               @local::ICARUSCheatOpFlashTPC0
+            cheatopflashTPC1:               @local::ICARUSCheatOpFlashTPC1
+            cheatopflashTPC2:               @local::ICARUSCheatOpFlashTPC2
+            cheatopflashTPC3:               @local::ICARUSCheatOpFlashTPC3
+
+            ### mc producers
+            mchitfinder:                    @local::standard_mchitfinder
+            mcassociationsGausCryoE:        @local::standard_mcparticlehitmatching
+            mcassociationsGausCryoW:        @local::standard_mcparticlehitmatching
+}
+
+physics.reco: [ 
+                @sequence::icarus_reco_Gauss_CryoE ,
+                @sequence::icarus_reco_Gauss_CryoW ,
+		# Redo the OpFlashes...
+		opflashCryoE, opflashCryoW,
+		# And continue on...
+		@sequence::icarus_reco_fm,
+		# Redo the CRT Track stuff...
+		@sequence::icarus_crttrack
+		# And continue on...
+                #caloskimCalorimetryCryoE, caloskimCalorimetryCryoW,
+                #mcassociationsGausCryoE,  mcassociationsGausCryoW
+              ]
+
+# Turn on truth-info for track skimmer 
+physics.analyzers.caloskimE.G4producer: "largeant"
+physics.analyzers.caloskimE.SimChannelproducer: "largeant"
+physics.analyzers.caloskimE.RawDigitproducers: ["MCDecodeTPCROI:PHYSCRATEDATATPCEW", "MCDecodeTPCROI:PHYSCRATEDATATPCEE"]
+physics.analyzers.caloskimW.G4producer: "largeant"
+physics.analyzers.caloskimW.SimChannelproducer: "largeant"
+physics.analyzers.caloskimW.RawDigitproducers: ["MCDecodeTPCROI:PHYSCRATEDATATPCWW", "MCDecodeTPCROI:PHYSCRATEDATATPCWE"]
+
+physics.outana:            [ caloskimE, caloskimW, simpleLightAna, CRTDataAnalysis]
+physics.trigger_paths:     [ reco ]
+physics.end_paths:         [ outana, stream1 ]
+outputs.out1.fileName:     "%ifb_%tc-%p.root"
+outputs.out1.dataTier:     "reconstructed"
+outputs.out1.SelectEvents: [ reco ]
+outputs.out1.outputCommands: [
+  "keep *_*_*_*",
+  "drop *_caloskimCalorimetryCryoE_*_*",
+  "drop *_caloskimCalorimetryCryoW_*_*"
+]
+
+# Disabled Space-Charge service for calorimetry
+services.SpaceChargeService: {
+    EnableCalEfieldSCE: false
+    EnableCalSpatialSCE: false
+    EnableCorrSCE: false
+    EnableSimEfieldSCE: false
+    EnableSimSpatialSCE: false
+    InputFilename: "SCEoffsets/SCEoffsets_ICARUS_E500_voxelTH3.root"
+    RepresentationType: "Voxelized_TH3"
+    service_provider: "SpaceChargeServiceICARUS"
+}
+
+services.BackTrackerService:        @local::standard_backtrackerservice
+services.BackTrackerService.BackTracker.OverrideRealData: true
+services.ParticleInventoryService:  @local::standard_particleinventoryservice
+services.ParticleInventoryService.ParticleInventory.OverrideRealData: true
+
+## BH -- turning this off since we don't want interplane differences...
+# Use this to take out the interplane offsets that are put in during the G4 stage
+#physics.producers.cluster3DCryoE.Hit3DBuilderAlg.UseT0Offsets: true
+#physics.producers.cluster3DCryoW.Hit3DBuilderAlg.UseT0Offsets: true
+
+physics.producers.mcassociationsGausCryoE.HitParticleAssociations.HitModuleLabelVec: ["cluster3DCryoE"]
+physics.producers.mcassociationsGausCryoW.HitParticleAssociations.HitModuleLabelVec: ["cluster3DCryoW"]
+
+## InterPlane = False
+services.DetectorPropertiesService.IncludeInterPlanePitchInXTickOffsets: false
+
+## OVERRIDES FOR OVERLAYS
+physics.producers.cluster3DCryoW.Hit3DBuilderAlg.HitFinderTagVec: ["overlayTPCHitWW", "overlayTPCHitWE"]
+physics.producers.cluster3DCryoE.Hit3DBuilderAlg.HitFinderTagVec: ["overlayTPCHitEW", "overlayTPCHitEE"]
+physics.producers.fmatchCryoE.OpHitProducer: "overlayPMTHit"
+physics.producers.fmatchCryoE.BeamSpillTimeStart: -0.2
+physics.producers.fmatchCryoE.BeamSpillTimeEnd: 9.7
+physics.producers.fmatchCryoE.FlashFindingTimeStart: -50
+physics.producers.fmatchCryoE.FlashFindingTimeEnd: 50
+physics.producers.fmatchCryoW.OpHitProducer: "overlayPMTHit"
+physics.producers.fmatchCryoW.BeamSpillTimeStart: -0.2
+physics.producers.fmatchCryoW.BeamSpillTimeEnd: 9.7
+physics.producers.fmatchCryoW.FlashFindingTimeStart: -50
+physics.producers.fmatchCryoW.FlashFindingTimeEnd: 50
+physics.producers.crttrack.DataLabelHits: "overlayCRTHit"
+physics.producers.opflashCryoE.OpHitProducer: "overlayPMTHit"
+physics.producers.opflashCryoW.OpHitProducer: "overlayPMTHit"

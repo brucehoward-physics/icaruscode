@@ -9,5 +9,6 @@ add_subdirectory(caf)
 add_subdirectory(services)
 add_subdirectory(utilities)
 add_subdirectory(compatibility)
+add_subdirectory(overlays)
 
 install_fhicl()

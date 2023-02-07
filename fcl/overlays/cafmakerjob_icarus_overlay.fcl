@@ -1,0 +1,60 @@
+#include "services_common_icarus.fcl"
+#include "channelmapping_icarus.fcl"
+
+#include "correctionservices_icarus.fcl"
+#include "particleinventoryservice.fcl"
+#include "backtrackerservice.fcl"
+#include "photonbacktrackerservice.fcl"
+#include "mccheatermodules.fcl"
+
+#include "cafmaker_defs.fcl"
+
+process_name: CAFmaker
+
+services:
+{
+  ParticleInventoryService:  @local::standard_particleinventoryservice
+  BackTrackerService:        @local::standard_backtrackerservice
+  @table::icarus_wirecalibration_minimum_services
+  @table::icarus_random_services  # from services_common_icarus.fcl
+
+  SpaceChargeService: @local::icarus_spacecharge
+}
+
+
+outputs:
+{
+  outpid:
+  {
+    dataTier: cafana # for grid
+    streamName: out1 # for grid
+    module_type: RootOutput
+    fileName:    "stage2_r%r_s%s.root"
+    saveMemoryObjectThreshold: 0
+  }
+}
+
+physics:
+{
+ 
+  producers: {
+    @table::caf_preprocess_producers
+  }
+
+  runprod: [ @sequence::caf_preprocess_sequence, cafmaker]
+  stream1:       [  ]
+  trigger_paths: [ runprod ] 
+  end_paths:     [ stream1 ]
+}
+
+# Blinding not needed for MC
+physics.producers.cafmaker.CreateBlindedCAF: false
+
+## BH overrides
+#physics.producers.cafmaker.OpFlashLabel: ""
+physics.producers.cafmaker.CRTHitLabel: "overlayCRTHit"
+physics.producers.cafmaker.OverrideRealData: true
+
+services.DetectorPropertiesService.IncludeInterPlanePitchInXTickOffsets: false
+services.BackTrackerService.BackTracker.OverrideRealData: true
+services.ParticleInventoryService.ParticleInventory.OverrideRealData: true

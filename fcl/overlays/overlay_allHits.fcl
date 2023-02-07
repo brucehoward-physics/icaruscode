@@ -1,0 +1,101 @@
+###
+## This fhicl file is used to run "stage0" processing specifically for the case where all
+## TPC data is included in an artdaq data product from a single instance
+##
+#include "stage0_icarus_mc_defs.fcl"
+#include "stage0_icarus_driver_common.fcl"
+
+process_name: OverlayHits
+
+## Add the MC module to the list of producers
+physics.producers: {
+		      overlayTPCHitEE:
+		      {
+		        module_type: "OverlayProducts"
+			TPCOverlayRaw: false
+			TPCOverlayHits: true
+			TPCHitsWireAssn: false
+			TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits: false
+                        CRTOverlayHits: false
+			TPCHitInputLabels: ["gaushitTPCEE::stage0", "gaushitTPCEE::MCstage0"]
+		      }
+		      overlayTPCHitEW:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: true
+			TPCHitsWireAssn: false
+			TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits:	false
+                        CRTOverlayHits: false
+                        TPCHitInputLabels: ["gaushitTPCEW::stage0", "gaushitTPCEW::MCstage0"]
+                      }
+		      overlayTPCHitWE:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: true
+			TPCHitsWireAssn: false
+			TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits:	false
+                        CRTOverlayHits: false
+                        TPCHitInputLabels: ["gaushitTPCWE::stage0", "gaushitTPCWE::MCstage0"]
+                      }
+		      overlayTPCHitWW:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: true
+			TPCHitsWireAssn: false
+			TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits:	false
+                        CRTOverlayHits: false
+                        TPCHitInputLabels: ["gaushitTPCWW::stage0", "gaushitTPCWW::MCstage0"]
+                      }
+
+		      overlayOpHit:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits: false
+                        TPCHitsWireAssn: false
+                        TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits: true
+                        CRTOverlayHits: false
+                        PMTHitInputLabels: ["ophit::stage0","ophit::MCstage0"]
+                      }
+
+		      overlayCRTHit:
+                      {
+                        module_type: "OverlayProducts"
+                        TPCOverlayRaw: false
+                        TPCOverlayHits:	false
+                        TPCHitsWireAssn: false
+                        TPCOverlayROI: false
+                        PMTOverlayRaw: false
+                        PMTOverlayHits: false
+                        CRTOverlayHits: true
+                        CRTHitInputLabels: ["crthit::stage0","crthit::MCstage0"]
+                      }
+                   }
+
+## Use the following to run the full defined stage0 set of modules
+physics.reco: [ overlayTPCHitWW, overlayTPCHitWE, overlayTPCHitEW, overlayTPCHitEE, overlayOpHit, overlayCRTHit ]
+
+## boiler plate...
+physics.outana:        [ ]
+physics.trigger_paths: [ reco ]
+physics.end_paths:     [ outana, streamROOT ]
+
+## Note that for output we hijack the "rootOutput" definition (but change the naming convention to make more generic for MC)
+outputs.rootOutput.fileName: "%ifb_%tc-%p.root"
+outputs.rootOutput.dataTier: "reconstructed"
+
+# Drop the artdaq format files on output
+outputs.rootOutput.outputCommands: ["keep *_*_*_*","drop *_gaushitTPC*_*_*","drop *_ophit*_*_*","drop *_opflash*_*_*","drop *_crthit*_*_*","drop *_crttrack*_*_*"]
