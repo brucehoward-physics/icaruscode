@@ -92,6 +92,7 @@
     <InputCaloHitListNames>CaloHitListU CaloHitListV CaloHitListW</InputCaloHitListNames>
     <InputClusterListNames>ClustersU ClustersV ClustersW</InputClusterListNames>
     <OutputVertexListName>NeutrinoVertices3D</OutputVertexListName>
+    <MinVertexAcceptableViews>2</MinVertexAcceptableViews>
     <ReplaceCurrentVertexList>true</ReplaceCurrentVertexList>
     <MvaFileName>PandoraBdt_v09_14_00_ICARUS_vertex_bnb.xml</MvaFileName>
     <RegionMvaName>VertexBDTRegion</RegionMvaName>
