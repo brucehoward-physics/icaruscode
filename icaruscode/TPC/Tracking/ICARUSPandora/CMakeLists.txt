@@ -38,6 +38,8 @@ set(            MODULE_LIBRARIES
         )
 cet_build_plugin(HARPS art::module LIBRARIES ${MODULE_LIBRARIES})
 
+cet_build_plugin(OverlayTPCHits art::module LIBRARIES ${MODULE_LIBRARIES})
+
 set( TOOL_LIBRARIES
 	larpandora::LArPandoraInterface
 	lardataobj::RecoBase
