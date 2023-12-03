@@ -25,6 +25,7 @@
 #include "lardataobj/RecoBase/PFParticle.h"
 #include "lardataobj/RecoBase/Wire.h"
 #include "lardataobj/RecoBase/Track.h"
+#include "lardataobj/RecoBase/Vertex.h"
 #include "lardataobj/RecoBase/Hit.h"
 #include "lardata/ArtDataHelper/HitCreator.h"
 #include "lardataobj/RecoBase/SpacePoint.h"
@@ -54,6 +55,9 @@ public:
 
   // Required functions.
   void produce(art::Event& e) override;
+
+  typedef std::pair<unsigned int, float> WireTimePair_t;
+  typedef std::pair<WireTimePair_t, WireTimePair_t> PairOfWireTimePair_t;
 
 private:
 
@@ -111,6 +115,13 @@ HARPS::HARPS(fhicl::ParameterSet const& p)
   if ( fMaskBeginningDist>0. && fMaskEndDist>0. )
     throw cet::exception("HARPS") << "Error... Should not try to mask the beginning and ALSO some distance from the end..." << std::endl;
 
+  //////
+  // TODO: there is something a little strange here with saving the daughters and keeping the end or start dist... FOR NOW, if
+  //       we do fTagDaughters, do *NOT* allow fMaskBeginningDist or fMaskEndDist... and in this case the vertex we want to return
+  //       is the parent particle's start/vertex position.
+  if ( (fKeepContext || fTagDaughters) && (fMaskBeginningDist>0. || fMaskEndDist>0.) )
+    throw cet::exception("HARPS") << "Error... something strange about trying to keep daughters and remove based on start/end positions..." << std::endl;
+
   recob::HitCollectionCreator::declare_products(producesCollector(), fTPCHitCreatorInstanceName, fTPCHitsWireAssn, false);
 
   // Load in the PFP list of interest and put contents into a map for fast lookup. BASED ON larevt/Filters/EventFilter_module.cc
@@ -131,6 +142,8 @@ HARPS::HARPS(fhicl::ParameterSet const& p)
   in.close();
 
   fFlatRand = new CLHEP::RandFlat(fFlatEngine,0.,1.);
+
+  produces<std::vector<recob::Vertex>>();
 }
 
 void HARPS::produce(art::Event& e)
@@ -143,6 +156,9 @@ void HARPS::produce(art::Event& e)
 
   // As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc)
   recob::HitCollectionCreator hitCol(e, fTPCHitCreatorInstanceName, fTPCHitsWireAssn, false);
+
+  // Make the vector of vertices: if using fKeepContext then we will output an EMPTY vector of vertices
+  std::unique_ptr< std::vector<recob::Vertex> > vtxVec( std::make_unique< std::vector<recob::Vertex> >() );
 
   // Load in the PFParticles, Tracks, and Hits & the necessary FindManyP's
   for ( unsigned int iCryo=0; iCryo<2; ++iCryo ) {
@@ -159,6 +175,12 @@ void HARPS::produce(art::Event& e)
       mf::LogError("HARPS") << "Error pulling in PFParticle product... Skipping cryostat.";
     }
 
+    // Get the find many for vertices, we only really want this if fTagDaughters is true at moment...
+    art::FindManyP<recob::Vertex> fmVtx(pfpHandle, e, fPFParticleModuleLabels[iCryo]);
+    if ( !fmVtx.isValid() ){
+      throw cet::exception("HARPS") << "Module wants to use invalid association to recob::Vertex." << std::endl;
+    }
+
     // sort the PFParticles by id
     // annoying as recob::PFParticle has a < opperator, but we have art::Ptr<recob::PFParticle> 
     std::sort(pfps.begin(), pfps.end(), [](art::Ptr<recob::PFParticle> pfpA, art::Ptr<recob::PFParticle> pfpB){ return pfpA->Self() < pfpB->Self(); });
@@ -166,6 +188,14 @@ void HARPS::produce(art::Event& e)
     // if we are tagging daughters find them here
     if (fTagDaughters)
     {
+      // if we're going to tag daughters, save the parent particles' vertices first
+      for ( auto const& pfpId : aliasParticleList[evtID] ) {
+        const std::vector< art::Ptr<recob::Vertex> > vtxFromPFP = fmVtx.at(pfps[pfpId]->Self());
+        if ( vtxFromPFP.size() != 1 ) continue;
+        double vtxPos[3] = {vtxFromPFP.at(0)->position().X(), vtxFromPFP.at(0)->position().Y(), vtxFromPFP.at(0)->position().Z()};
+        vtxVec->push_back( recob::Vertex(vtxPos) );
+      }
+
       auto idItr = aliasParticleList[evtID].begin();
       while (idItr != aliasParticleList[evtID].end())
       {
@@ -248,34 +278,192 @@ void HARPS::produce(art::Event& e)
       std::map< unsigned int, std::vector< art::Ptr<recob::Hit> > > planeToHitsMap;
       std::map< unsigned int, std::set< unsigned int > > planeToIdxMap;
 
+      // map for the interpolation
+      // first elem is PlaneID --> combination of cryo, tpc, plane
+      // second elem is pair of <<lo wire, lo time>, <hi wire, hi time>>
+      std::map< geo::PlaneID, PairOfWireTimePair_t > wireToTimeRangeMap;
+
+      std::map< unsigned int, geo::PlaneID > planeNumToPlaneID_ForMaskBeginningDist; // planeID for begin point from which we'll search a box
+      std::map< unsigned int, WireTimePair_t > planeNumToWireTime_ForMaskBeginningDist; // WireTimePair_t for begin point from which we'll search a box
+      std::map< unsigned int, double > planeNumToPtDist_ForMaskBeginningDist; // min distance for begin point from which we'll search a box
+      std::map< unsigned int, geo::PlaneID > planeNumToPlaneID_ForMaskEndDist; // planeID for end point from which we'll search a box
+      std::map< unsigned int, WireTimePair_t > planeNumToWireTime_ForMaskEndDist; // WireTimePair_t for end point from which we'll search a box
+      std::map< unsigned int, double > planeNumToPtDist_ForMaskEndDist; // min distance for end point from which we'll search a box
+
+      // Vertex coordinates: only used if fMaskBeginningDist or fMaskEndDist are > 0.
+      double minmaxDist = ( fMaskBeginningDist > 0. ? 9999. : ( fMaskEndDist > 0. ? -9999. :  0.) );
+      double vtxX = -9999.;
+      double vtxY = -9999.;
+      double vtxZ = -9999.;
+
       // Loop as in my overlay module, copy hits passing the criteria into the maps for checking against other criteria...
       for( auto const& iHitPtr : hitsFromTrk ) {
         // Check if we want to remove this hit because we are masking X distance from the beginning:
         // TODO: as a start, use the Pandora spacepoints<->hit association... is this safe or should we do something in 2d distances?
+        // UPDATE: loop through twice and save the max and min wires (and times?) the first time for things with a match and use these to
+        //         save some of the 0 match cases the second time through via interpolation... only in the MaskBeginning or MaskEnd case...
         if ( fMaskBeginningDist > 0. ) {
           const std::vector< art::Ptr<recob::SpacePoint> > spsFromHit = fmSps.at(iHitPtr.key());
           if ( spsFromHit.size() != 1 ) {
-            mf::LogError("HARPS") << "fmSps gave us something other than one spacepoint for this hit (" << spsFromHit.size() << ")... Skipping.";
+            if ( spsFromHit.size() > 1 ) mf::LogError("HARPS") << "fmSps gave us something more than one spacepoint for this hit (" << spsFromHit.size() << ")... Skipping.";
             continue;
           }
           const auto thisXYZ = spsFromHit.at(0)->XYZ();
           if ( std::hypot( trkStartX-thisXYZ[0], trkStartY-thisXYZ[1], trkStartZ-thisXYZ[2] ) < fMaskBeginningDist ) continue;
-        }
+
+          // if this spacepoint is closest to the track start, save it as our 3D Vertex
+          if ( std::hypot( trkStartX-thisXYZ[0], trkStartY-thisXYZ[1], trkStartZ-thisXYZ[2] ) < minmaxDist ) {
+            minmaxDist = std::hypot( trkStartX-thisXYZ[0], trkStartY-thisXYZ[1], trkStartZ-thisXYZ[2] );
+            vtxX = thisXYZ[0];
+            vtxY = thisXYZ[1];
+            vtxZ = thisXYZ[2];
+          }
+
+          // Check wireToTimeRangeMap
+          const auto planeid = iHitPtr->WireID().asPlaneID();
+          const unsigned int thisplane = iHitPtr->WireID().Plane;
+          const unsigned int thiswire = iHitPtr->WireID().Wire;
+          const float thistime = iHitPtr->PeakTime();
+          if ( wireToTimeRangeMap.count(planeid) == 0 ) {
+            wireToTimeRangeMap[planeid] = std::make_pair<WireTimePair_t, WireTimePair_t>( std::make_pair<unsigned int, float>(iHitPtr->WireID().Wire, iHitPtr->PeakTime()),
+                                                                                          std::make_pair<unsigned int, float>(iHitPtr->WireID().Wire, iHitPtr->PeakTime()) );
+          }
+          else {
+            if ( thiswire < wireToTimeRangeMap[planeid].first.first ) {
+              wireToTimeRangeMap[planeid].first.first = thiswire;
+              wireToTimeRangeMap[planeid].first.second = thistime;
+            }
+            else if ( thiswire == wireToTimeRangeMap[planeid].first.first && thistime < wireToTimeRangeMap[planeid].first.second ) {
+              wireToTimeRangeMap[planeid].first.second = thistime;
+            }
+            else if ( thiswire == wireToTimeRangeMap[planeid].second.first && thistime > wireToTimeRangeMap[planeid].second.second ) {
+              wireToTimeRangeMap[planeid].second.second = thistime;
+            }
+            if ( thiswire > wireToTimeRangeMap[planeid].second.first ) {
+              wireToTimeRangeMap[planeid].second.first = thiswire;
+              wireToTimeRangeMap[planeid].second.second = thistime;
+            }
+          } // filling up the hit min/max map
+
+          // Also deal with where to put a box to search near the beginning of track for hits unassociated with spacepoints
+          if ( planeNumToPtDist_ForMaskBeginningDist.count(thisplane) == 0 ) {
+            planeNumToPtDist_ForMaskBeginningDist[thisplane] = std::hypot( trkStartX-thisXYZ[0], trkStartY-thisXYZ[1], trkStartZ-thisXYZ[2] );
+            planeNumToPlaneID_ForMaskBeginningDist[thisplane] = planeid;
+            planeNumToWireTime_ForMaskBeginningDist[thisplane] = std::make_pair<unsigned int, float>(iHitPtr->WireID().Wire, iHitPtr->PeakTime());
+          }
+          else if ( std::hypot( trkStartX-thisXYZ[0], trkStartY-thisXYZ[1], trkStartZ-thisXYZ[2] ) < planeNumToPtDist_ForMaskBeginningDist[thisplane] ) {
+            planeNumToPtDist_ForMaskBeginningDist[thisplane] = std::hypot( trkStartX-thisXYZ[0], trkStartY-thisXYZ[1], trkStartZ-thisXYZ[2] );
+            planeNumToPlaneID_ForMaskBeginningDist[thisplane] = planeid;
+            planeNumToWireTime_ForMaskBeginningDist[thisplane] = std::make_pair<unsigned int, float>(iHitPtr->WireID().Wire, iHitPtr->PeakTime());
+          }
+        } // fMaskBeginningDist
         else if ( fMaskEndDist > 0. ) {
           const std::vector< art::Ptr<recob::SpacePoint> > spsFromHit = fmSps.at(iHitPtr.key());
           if ( spsFromHit.size() != 1 ) {
-            mf::LogError("HARPS") << "fmSps gave us something other than one spacepoint for this hit (" << spsFromHit.size() << ")... Skipping.";
+            if ( spsFromHit.size() > 1 ) mf::LogError("HARPS") << "fmSps gave us something more than one spacepoint for this hit (" << spsFromHit.size() << ")... Skipping.";
             continue;
           }
           const auto thisXYZ = spsFromHit.at(0)->XYZ();
           if ( std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] ) > fMaskEndDist ) continue;
-        }
+
+          // if this spacepoint is furthest from the track end, save it as our 3D Vertex
+          if ( std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] ) > minmaxDist ) {
+            minmaxDist = std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] );
+            vtxX = thisXYZ[0];
+            vtxY = thisXYZ[1];
+            vtxZ = thisXYZ[2];
+          }
+
+          // Check wireToTimeRangeMap
+          const auto planeid = iHitPtr->WireID().asPlaneID();
+          const unsigned int thisplane = iHitPtr->WireID().Plane;
+          const unsigned int thiswire = iHitPtr->WireID().Wire;
+          const float thistime = iHitPtr->PeakTime();
+          if ( wireToTimeRangeMap.count(planeid) == 0 ) {
+            wireToTimeRangeMap[planeid] = std::make_pair<WireTimePair_t, WireTimePair_t>( std::make_pair<unsigned int, float>(iHitPtr->WireID().Wire, iHitPtr->PeakTime()),
+                                                                                          std::make_pair<unsigned int, float>(iHitPtr->WireID().Wire, iHitPtr->PeakTime()) );
+          }
+          else {
+            if ( thiswire < wireToTimeRangeMap[planeid].first.first ) {
+              wireToTimeRangeMap[planeid].first.first = thiswire;
+              wireToTimeRangeMap[planeid].first.second = thistime;
+            }
+            else if ( thiswire == wireToTimeRangeMap[planeid].first.first && thistime < wireToTimeRangeMap[planeid].first.second ) {
+              wireToTimeRangeMap[planeid].first.second = thistime;
+            }
+            else if ( thiswire == wireToTimeRangeMap[planeid].second.first && thistime > wireToTimeRangeMap[planeid].second.second ) {
+              wireToTimeRangeMap[planeid].second.second = thistime;
+            }
+            if ( thiswire > wireToTimeRangeMap[planeid].second.first ) {
+              wireToTimeRangeMap[planeid].second.first = thiswire;
+              wireToTimeRangeMap[planeid].second.second = thistime;
+            }
+          } // filling up the hit min/max map
+
+          // Also deal with where to put a box to search near the beginning of track for hits unassociated with spacepoints
+          if ( planeNumToPtDist_ForMaskEndDist.count(thisplane) == 0 ) {
+            planeNumToPtDist_ForMaskEndDist[thisplane] = std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] );
+            planeNumToPlaneID_ForMaskEndDist[thisplane] = planeid;
+            planeNumToWireTime_ForMaskEndDist[thisplane] = std::make_pair<unsigned int, float>(iHitPtr->WireID().Wire, iHitPtr->PeakTime());
+          }
+          else if ( std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] ) < planeNumToPtDist_ForMaskEndDist[thisplane] ) {
+            planeNumToPtDist_ForMaskEndDist[thisplane] = std::hypot( trkStartX-thisXYZ[0], trkStartY-thisXYZ[1], trkStartZ-thisXYZ[2] );
+            planeNumToPlaneID_ForMaskEndDist[thisplane] = planeid;
+            planeNumToWireTime_ForMaskEndDist[thisplane] = std::make_pair<unsigned int, float>(iHitPtr->WireID().Wire, iHitPtr->PeakTime());
+          }
+        } // fMaskEndDist
 
         unsigned int plane = iHitPtr->WireID().Plane;
         unsigned int idx = 5000*4*3*iHitPtr->WireID().Cryostat + 5000*3*iHitPtr->WireID().TPC + 5000*iHitPtr->WireID().Plane + iHitPtr->WireID().Wire;
         planeToHitsMap[plane].push_back( iHitPtr );
         planeToIdxMap[plane].emplace( idx );
-      }
+      } // loop hits
+
+      // If we are masking by distance we may have skipped hits due to not being associated with a spacepoint...
+      // Let's try to add those back to the output by interpolating wires/times
+      if ( fMaskBeginningDist > 0. || fMaskEndDist > 0. ) {
+        for( auto const& iHitPtr : hitsFromTrk ) {
+          const std::vector< art::Ptr<recob::SpacePoint> > spsFromHit = fmSps.at(iHitPtr.key());
+          if ( spsFromHit.size() != 0 ) {
+            continue; // only want hits without spacepoints here
+          }
+          // The info to compare to map
+          const auto planeid = iHitPtr->WireID().asPlaneID();
+          const unsigned int thisplane = iHitPtr->WireID().Plane;
+          const unsigned int thiswire = iHitPtr->WireID().Wire;
+          const float thistime = iHitPtr->PeakTime();
+          if ( wireToTimeRangeMap.count(planeid) == 0 ) {
+            continue; // nothing on this plane in the map
+          }
+          // Check if it's within the interpolation and add it to the save map if so
+          if ( thiswire >= wireToTimeRangeMap[planeid].first.first && thistime >= wireToTimeRangeMap[planeid].first.second &&
+               thiswire <= wireToTimeRangeMap[planeid].second.first && thistime <= wireToTimeRangeMap[planeid].second.second ) {
+            unsigned int plane = iHitPtr->WireID().Plane;
+            unsigned int idx = 5000*4*3*iHitPtr->WireID().Cryostat + 5000*3*iHitPtr->WireID().TPC + 5000*iHitPtr->WireID().Plane + iHitPtr->WireID().Wire;
+            planeToHitsMap[plane].push_back( iHitPtr );
+            planeToIdxMap[plane].emplace( idx );
+          } // check on interpolation
+          // Also check in a box near the beginning (if fMaskBeginningDist) or the end (if fMaskEndDist): let's start with ~3 cm
+          // --> so a box of about 10 wires and 50 ticks
+          else if ( ( fMaskBeginningDist > 0. &&
+                      planeid == planeNumToPlaneID_ForMaskBeginningDist[thisplane] &&
+                      abs(int(thiswire)-int(planeNumToWireTime_ForMaskBeginningDist[thisplane].first)) < 10 &&
+                      fabs(thistime-planeNumToWireTime_ForMaskBeginningDist[thisplane].second) < 50. ) ||
+                    ( fMaskEndDist > 0. &&
+                      planeid == planeNumToPlaneID_ForMaskEndDist[thisplane] &&
+                      abs(int(thiswire)-int(planeNumToWireTime_ForMaskEndDist[thisplane].first)) < 10 &&
+                      fabs(thistime-planeNumToWireTime_ForMaskEndDist[thisplane].second) < 50. ) ){
+            unsigned int plane = iHitPtr->WireID().Plane;
+            unsigned int idx = 5000*4*3*iHitPtr->WireID().Cryostat + 5000*3*iHitPtr->WireID().TPC + 5000*iHitPtr->WireID().Plane + iHitPtr->WireID().Wire;
+            planeToHitsMap[plane].push_back( iHitPtr );
+            planeToIdxMap[plane].emplace( idx );
+          } // check "extrapolation box"
+        } // loop hits
+
+        // PUT THE 3D VERTEX BACK INTO EVENT
+        double vtxPos[3] = {vtxX, vtxY, vtxZ};
+        vtxVec->push_back( recob::Vertex(vtxPos) );
+      } // only run if masking by distance
 
       // Pick wires to remove!
       std::map< unsigned int, std::set< unsigned int > > planeToIdxRemoval;
@@ -318,6 +506,7 @@ void HARPS::produce(art::Event& e)
     } // loop pfps
   } // loop cryos
 
+  e.put(std::move(vtxVec));
   hitCol.put_into(e);
 }
 
