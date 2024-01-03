@@ -56,6 +56,8 @@ public:
   // Required functions.
   void produce(art::Event& e) override;
 
+  double FindNearestTrajPointRR( const std::map<std::tuple<double,double,double>, double>& trjPtToRR, const double* in_xyz );
+
   typedef std::pair<unsigned int, float> WireTimePair_t;
   typedef std::pair<WireTimePair_t, WireTimePair_t> PairOfWireTimePair_t;
 
@@ -89,6 +91,7 @@ private:
 
   bool fTagDaughters; ///< Are we tagging daughter particles?
   bool fKeepContext;  ///< Are we doing the inverse operation (ie keeping only the context)?
+  bool fUseTrajPointForDist; ///< Are we making a map for track trajectory points to start/end distance to use
 };
 
 
@@ -107,7 +110,8 @@ HARPS::HARPS(fhicl::ParameterSet const& p)
   fTPCHitCreatorInstanceName ( p.get<std::string>("TPCHitCreatorInstanaceName","") ),
   fFlatEngine                ( art::ServiceHandle<rndm::NuRandomService>()->createEngine(*this, "HepJamesRandom", "Gen", p, "Seed") ),
   fTagDaughters              ( p.get< bool >("TagDaughters", false) ),
-  fKeepContext               ( p.get< bool >("KeepContext", false) )
+  fKeepContext               ( p.get< bool >("KeepContext", false) ),
+  fUseTrajPointForDist       ( p.get< bool >("UseTrajPointForDist", false) )
 {
   if ( fPFParticleModuleLabels.size()!=fTrackModuleLabels.size() || fPFParticleModuleLabels.size()!=fHitModuleLabels.size() )
     throw cet::exception("HARPS") << "Error... InputTag vectors need to be same size..." << std::endl; // borrow from elsewhere
@@ -119,7 +123,7 @@ HARPS::HARPS(fhicl::ParameterSet const& p)
   // TODO: there is something a little strange here with saving the daughters and keeping the end or start dist... FOR NOW, if
   //       we do fTagDaughters, do *NOT* allow fMaskBeginningDist or fMaskEndDist... and in this case the vertex we want to return
   //       is the parent particle's start/vertex position.
-  if ( (fKeepContext || fTagDaughters) && (fMaskBeginningDist>0. || fMaskEndDist>0.) )
+  if ( (fKeepContext || fTagDaughters) && (fMaskBeginningDist>0. || fMaskEndDist>0. || fUseTrajPointForDist) )
     throw cet::exception("HARPS") << "Error... something strange about trying to keep daughters and remove based on start/end positions..." << std::endl;
 
   recob::HitCollectionCreator::declare_products(producesCollector(), fTPCHitCreatorInstanceName, fTPCHitsWireAssn, false);
@@ -148,17 +152,20 @@ HARPS::HARPS(fhicl::ParameterSet const& p)
 
 void HARPS::produce(art::Event& e)
 {
-  // Return empty hit container if no particles of interest.
-  std::string evtID = std::to_string(e.run()) + ":" + std::to_string(e.subRun()) + ":" + std::to_string(e.event());
-  if ( fParticleListCryo0.find(evtID) == fParticleListCryo0.end() &&
-       fParticleListCryo1.find(evtID) == fParticleListCryo1.end() )
-    return;
-
   // As in Gauss Hit Finder code (larreco/HitFinder/GausHitFinder_module.cc)
   recob::HitCollectionCreator hitCol(e, fTPCHitCreatorInstanceName, fTPCHitsWireAssn, false);
 
   // Make the vector of vertices: if using fKeepContext then we will output an EMPTY vector of vertices
   std::unique_ptr< std::vector<recob::Vertex> > vtxVec( std::make_unique< std::vector<recob::Vertex> >() );
+
+  // Return empty hit container if no particles of interest.
+  std::string evtID = std::to_string(e.run()) + ":" + std::to_string(e.subRun()) + ":" + std::to_string(e.event());
+  if ( fParticleListCryo0.find(evtID) == fParticleListCryo0.end() &&
+       fParticleListCryo1.find(evtID) == fParticleListCryo1.end() ) {
+    e.put(std::move(vtxVec));
+    hitCol.put_into(e);
+    return;
+  }
 
   // Load in the PFParticles, Tracks, and Hits & the necessary FindManyP's
   for ( unsigned int iCryo=0; iCryo<2; ++iCryo ) {
@@ -261,8 +268,51 @@ void HARPS::produce(art::Event& e)
 
       const std::vector< art::Ptr<recob::Track> > trkFromPFP = fmTrk.at(pfp.key());
       if ( trkFromPFP.size() != 1 ) {
-        mf::LogError("HARPS") << "fmTrk gave us more than one track for this PFParticle... Skipping.";
+        mf::LogError("HARPS") << "fmTrk gave us more (or less) than one track for this PFParticle... Skipping.";
         continue;
+      }
+
+      // If using Traj Points for distance calculation (via RR)
+      std::vector<recob::tracking::Point_t> trkFilterTrajPt;
+      std::vector<double> trkTrajPtLengths;
+      std::map<std::tuple<double,double,double>, double> mapTrajPtEndDist;
+
+      if ( fUseTrajPointForDist ) {
+        // First let's make a vector that is iterable (I think we can assume they are sorted?)
+        double prev_x(0.), prev_y(0.), prev_z(0.);
+        for ( unsigned int idxTrajPt=0; idxTrajPt < trkFromPFP.at(0)->NumberTrajectoryPoints(); ++idxTrajPt ) {
+          if ( !trkFromPFP.at(0)->HasValidPoint(idxTrajPt) ) continue;
+          trkFilterTrajPt.push_back( trkFromPFP.at(0)->TrajectoryPoint(idxTrajPt).position );
+          if ( idxTrajPt == 0 ) {
+            trkTrajPtLengths.push_back(0.);
+            prev_x = trkFromPFP.at(0)->TrajectoryPoint(idxTrajPt).position.x();
+            prev_y = trkFromPFP.at(0)->TrajectoryPoint(idxTrajPt).position.y();
+            prev_z = trkFromPFP.at(0)->TrajectoryPoint(idxTrajPt).position.z();
+          }
+          else {
+            double this_x = trkFromPFP.at(0)->TrajectoryPoint(idxTrajPt).position.x();
+            double this_y = trkFromPFP.at(0)->TrajectoryPoint(idxTrajPt).position.y();
+            double this_z = trkFromPFP.at(0)->TrajectoryPoint(idxTrajPt).position.z();
+            trkTrajPtLengths.push_back( std::hypot( this_x-prev_x, this_y-prev_y, this_z-prev_z) );
+            prev_x = this_x;
+            prev_y = this_y;
+            prev_z = this_z;
+          }
+        }
+        // Now let's build the maps
+        unsigned int idxTrajPt = 0;
+        for ( std::vector<double>::iterator it=trkTrajPtLengths.begin(); it!=trkTrajPtLengths.end(); ++it ) {
+          const double rr = std::accumulate( it, trkTrajPtLengths.end(), 0. );
+          //const recob::tracking::Point_t trajPtPoint = trkFromPFP.at(0)->TrajectoryPoint(idxTrajPt).position;
+          const std::tuple<double,double,double> trajPtPos = {trkFilterTrajPt[idxTrajPt].x(),trkFilterTrajPt[idxTrajPt].y(),trkFilterTrajPt[idxTrajPt].z()};
+          if ( mapTrajPtEndDist.find(trajPtPos) == mapTrajPtEndDist.end() ) {
+            mapTrajPtEndDist[trajPtPos] = rr;
+          }
+          else {
+            std::cout << "Found same traj point already? SKIPPING BUT PRINTING OUT THAT THIS HAS HAPPENED..." << std::endl;
+          }
+          idxTrajPt+=1;
+        }
       }
 
       double trkStartX = trkFromPFP.at(0)->Start().X();
@@ -364,14 +414,29 @@ void HARPS::produce(art::Event& e)
             continue;
           }
           const auto thisXYZ = spsFromHit.at(0)->XYZ();
-          if ( std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] ) > fMaskEndDist ) continue;
 
-          // if this spacepoint is furthest from the track end, save it as our 3D Vertex
-          if ( std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] ) > minmaxDist ) {
-            minmaxDist = std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] );
-            vtxX = thisXYZ[0];
-            vtxY = thisXYZ[1];
-            vtxZ = thisXYZ[2];
+          if ( !fUseTrajPointForDist ){
+            // Just uses stright-line distance
+            if ( std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] ) > fMaskEndDist ) continue;
+
+            // if this spacepoint is furthest from the track end, save it as our 3D Vertex
+            if ( std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] ) > minmaxDist ) {
+              minmaxDist = std::hypot( trkEndX-thisXYZ[0], trkEndY-thisXYZ[1], trkEndZ-thisXYZ[2] );
+              vtxX = thisXYZ[0];
+              vtxY = thisXYZ[1];
+              vtxZ = thisXYZ[2];
+            }
+          }
+          else {
+            // Uses the track's residual range by finding the closest traj point to this spacepoint
+            double nearestTrajPtRR = FindNearestTrajPointRR(mapTrajPtEndDist,thisXYZ);
+            if ( nearestTrajPtRR > fMaskEndDist || nearestTrajPtRR < 0. ) continue;
+            if ( nearestTrajPtRR > minmaxDist ) {
+              minmaxDist = nearestTrajPtRR;
+              vtxX = thisXYZ[0];
+              vtxY = thisXYZ[1];
+              vtxZ = thisXYZ[2];
+            }
           }
 
           // Check wireToTimeRangeMap
@@ -509,5 +574,39 @@ void HARPS::produce(art::Event& e)
   e.put(std::move(vtxVec));
   hitCol.put_into(e);
 }
+
+double HARPS::FindNearestTrajPointRR( const std::map<std::tuple<double,double,double>, double>& trjPtToRR, const double* in_xyz )
+{
+  std::cout << "The hit spacepoint at (" << in_xyz[0] << ", " << in_xyz[1] << ", " << in_xyz[2] << ") ";
+
+  if ( trjPtToRR.empty() ) {
+    std::cout << " ... has no match." << std::endl;
+    return -5.;
+  }
+
+  double minDistToPt = std::numeric_limits<double>::max();
+  double rrAtMinDist = -5.;
+  //double xAtMinDist = -5.;
+  //double yAtMinDist = -5.;
+  //double zAtMinDist = -5.;
+
+  for ( auto const& [pt, rr] : trjPtToRR ) {
+    double ptx = std::get<0>(pt);
+    double pty = std::get<1>(pt);
+    double ptz = std::get<2>(pt);
+    if ( std::hypot(in_xyz[0]-ptx, in_xyz[1]-pty, in_xyz[2]-ptz) < minDistToPt ) {
+      minDistToPt = std::hypot(in_xyz[0]-ptx, in_xyz[1]-pty, in_xyz[2]-ptz);
+      rrAtMinDist = rr;
+      //xAtMinDist = ptx;
+      //yAtMinDist = pty;
+      //zAtMinDist = ptz;
+    }
+  }
+
+  //std::cout << " ... has matched traj point at (" << xAtMinDist << ", " << yAtMinDist << ", " << zAtMinDist << "), with rr " << rrAtMinDist << std::endl;
+
+  return rrAtMinDist;
+}
+
 
 DEFINE_ART_MODULE(HARPS)
